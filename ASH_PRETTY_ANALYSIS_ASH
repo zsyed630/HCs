@@ -1,0 +1,96 @@
+set lines 200
+set pages 200
+set feedback off
+set echo off
+set scan on
+set serverout on
+set head off
+set verify off
+
+
+define STARTTIME='2022-04-12  10:40:00';
+define ENDTIME='2022-04-12  11:16:00';
+
+DECLARE
+CURSOR wait_classes IS
+select * from (select wait_class_id, wait_class, count(*) cnt from gv$active_session_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME' and wait_class_id is not null group by wait_class_id, wait_class order by 3 desc) where rownum <=3 ;
+wait_classes_cur wait_classes%ROWTYPE;
+BEGIN
+     OPEN wait_classes;
+     LOOP
+        FETCH wait_classes INTO wait_classes_cur;
+        exit WHEN wait_classes%NOTFOUND;
+                dbms_output.Put_line('WAIT CLASS : '||wait_classes_cur.wait_class||' has a wait count of '||wait_classes_cur.cnt);
+     END LOOP;
+     CLOSE wait_classes;
+END;
+/
+
+
+DECLARE
+CURSOR event_ids IS
+select * from (select event_id, event, count(*) cnt from gv$active_session_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME' and wait_class_id in (select wait_class_id from (select wait_class_id, wait_class, count(*) cnt from gv$active_session_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME' and wait_class_id is not null group by wait_class_id, wait_class order by 3 desc) where rownum <=3 ) group by event_id, event order by 3 desc) where rownum <=3;
+event_ids_cur event_ids%ROWTYPE;
+BEGIN
+     OPEN event_ids;
+     LOOP
+        FETCH event_ids INTO event_ids_cur;
+        exit WHEN event_ids%NOTFOUND;
+                dbms_output.Put_line('EVENT NAME : '||event_ids_cur.event||' has a wait count of '||event_ids_cur.cnt);
+     END LOOP;
+     CLOSE event_ids;
+END;
+/
+
+  1* select 'alter system kill session '||chr(39)||sid||','||serial#||',@'||inst_id||chr(39)||' immediate;' from gv$session where sql_id in ('g5ymgqjqnkv19','8y71r999fv528')
+
+
+
+
+DECLARE
+historical number;
+today number;
+CURSOR sql_ids IS
+select * from (select sql_id,event,count(*) cnt from gv$active_session_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME' and  event_id in (select event_id from (select event_id, event, count(*) cnt from gv$active_session_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME' and wait_class_id in (select wait_class_id from (select wait_class_id, wait_class, count(*) cnt from gv$active_session_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME' and wait_class_id is not null group by wait_class_id, wait_class order by 3 desc) where rownum <=5 ) group by event_id, event order by 3 desc) where rownum <=5) and sql_id is not null group by sql_id,event  order by 3 desc) where rownum <=20;
+sql_ids_cur sql_ids%ROWTYPE;
+BEGIN
+     OPEN sql_ids;
+     LOOP
+        FETCH sql_ids INTO sql_ids_cur;
+        exit WHEN sql_ids%NOTFOUND;
+                        select round(avg(ELAPSED_TIME_delta/1000000/greatest(executions_delta,1)),4) into historical from dba_hist_SQLSTAT a, dba_hist_snapshot b where sql_id in sql_ids_cur.sql_id and a.snap_id=b.snap_id and b.begin_interval_time > sysdate - 21 and a.instance_number=b.instance_number;
+                                select round(avg("avg duration (sec)"),4) into today from (select * from (select a.instance_number inst_id, a.snap_id,a.plan_hash_value, to_char(begin_interval_time,'dd-mon-yy hh24:mi') btime, abs(extract(minute from (end_interval_time-begin_interval_time)) + extract(hour from (end_interval_time-begin_interval_time))*60 + extract(day from (end_interval_time-begin_interval_time))*24*60) minutes, executions_delta executions, round(ELAPSED_TIME_delta/1000000/greatest(executions_delta,1),4) "avg duration (sec)", a.OPTIMIZER_COST from dba_hist_SQLSTAT a, dba_hist_snapshot b where sql_id in sql_ids_cur.sql_id and a.snap_id=b.snap_id and b.begin_interval_time > sysdate - 21 and a.instance_number=b.instance_number order by snap_id desc, a.instance_number) where rownum <= 4);
+
+                dbms_output.Put_line('SQL_ID : '||sql_ids_cur.sql_id||' has a wait count of '||sql_ids_cur.cnt||' todays avg exec time:'||today||' historical avg exec time:'||historical|| ' wait_event: '||sql_ids_cur.event);
+     END LOOP;
+     CLOSE sql_ids;
+END;
+/
+
+
+
+
+
+
+
+DECLARE
+owner_name varchar2(100);
+obj_name varchar2(100);
+obj_type varchar2(100);
+CURSOR object_ids IS
+select current_obj#,event,count(*) cnt from gv$active_session_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME' and sql_id in (select sql_id from (select sql_id, count(*) cnt from gv$active_session_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME' and  event_id in (select event_id from (select event_id, event, count(*) cnt from gv$active_session_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME' and wait_class_id in (select wait_class_id from (select wait_class_id, wait_class, count(*) cnt from gv$active_session_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME' and wait_class_id is not null group by wait_class_id, wait_class order by 3 desc) where rownum <=5 ) group by event_id, event order by 3 desc) where rownum <=5) and sql_id is not null group by sql_id,event  order by 2 desc) where rownum <=20) and current_obj# not in (0,1,-1) group by current_obj#,event order by 3 desc ;
+object_ids_cur object_ids%ROWTYPE;
+BEGIN
+     OPEN object_ids;
+     LOOP
+        FETCH object_ids INTO object_ids_cur;
+        exit WHEN object_ids%NOTFOUND;
+		select owner into owner_name from dba_objects where object_id in object_ids_cur.current_obj#;
+		select object_name into obj_name from dba_objects where object_id in object_ids_cur.current_obj#;
+		select object_type into obj_type from dba_objects where object_id in object_ids_cur.current_obj#;
+		dbms_output.Put_line('OWNER:'||owner_name||' OBJECT_NAME:'||obj_name||' OBJECT_TYPE:'||obj_type||' has wait count of '||object_ids_cur.cnt||' event_name '||object_ids_cur.event);
+     END LOOP;
+     CLOSE object_ids;
+END; 
+/
+
