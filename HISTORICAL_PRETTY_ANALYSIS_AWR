@@ -1,0 +1,401 @@
+set lines 400
+set pages 200
+set feedback off
+set echo off
+set scan on
+set serverout on
+set head off
+set verify off
+
+define STARTTIME='2022-03-24  14:07:00';
+define ENDTIME='2022-03-24  14:15:00';
+
+DECLARE
+historical varchar2(100);
+MOST_RECENT_EXEC_TIME number;
+MOST_RECENT_EXEC_TIME_PERIOD varchar2(100) ;
+owner_name varchar2(100);
+obj_name varchar2(100);
+obj_type varchar2(100);
+part_name varchar2(100);
+fragmented_percentage number;
+DEFINED_STARTTIME varchar2(100);
+DEFINED_ENDTIME varchar2(100);
+OBJECT_SIZE_GB number;
+OBJECT_SIZE_MB number;
+OBJECT_SIZE_KB number;
+OBJECT_SIZE_BYTES number;
+V_PCT_FREE number;
+V_PCT_USED number;
+V_INI_TRANS number;
+V_LAST_ANALYZED date;
+V_PHV number;
+V_PHV_COUNT number;
+V_SGA_MAX_SIZE varchar2(25);
+V_SHARED_POOL_SIZE varchar2(25);
+V_BUFFER_CACHE_SIZE varchar2(25);
+V_CPU_COUNT number;
+V_MIN_SNAP_ID number;
+V_MAX_SNAP_ID number;
+inst_num varchar2(20);
+inst_name varchar2(20);
+
+CURSOR sql_ids IS
+select * from (select sql_id,event,sql_plan_hash_value,current_obj#,count(*) cnt from dba_hist_active_sess_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME' and  event_id in (select event_id from (select event_id, event, count(*) cnt from dba_hist_active_sess_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME' and wait_class_id in (select wait_class_id from (select wait_class_id, wait_class, count(*) cnt from dba_hist_active_sess_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME' and wait_class_id is not null group by wait_class_id, wait_class order by 3 desc) where rownum <=5 ) group by event_id, event order by 3 desc) where rownum <=5) and sql_id is not null and current_obj# not in (0,1,-1) group by sql_id,event,sql_plan_hash_value,current_obj#  order by 5 desc) where rownum <=20;
+sql_ids_cur sql_ids%ROWTYPE;
+BEGIN
+    
+    select min(snap_id) into V_MIN_SNAP_ID from dba_hist_active_sess_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME'; 
+    select max(snap_id) into V_MAX_SNAP_ID from dba_hist_active_sess_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME'; 
+    select '&STARTTIME' into DEFINED_STARTTIME from dual;
+    select '&ENDTIME' into DEFINED_ENDTIME from dual;
+
+    dbms_output.put_line(chr(10));
+    dbms_output.put_line('DB INSTANCE RESOURCE ALLOCATIONS FOR TIME PERIOD '||DEFINED_STARTTIME||' to '||DEFINED_ENDTIME);
+    dbms_output.put_line('-------------------------------------------------------------------------------------------------------');
+
+    FOR V_UNQ_INSTANCES in (select instance_number , instance_name  from gv$instance)    
+    LOOP
+       BEGIN
+            select distinct(value) into V_CPU_COUNT from DBA_HIST_PARAMETER where snap_id between V_MIN_SNAP_ID and V_MAX_SNAP_ID and parameter_name = 'cpu_count' and INSTANCE_NUMBER = V_UNQ_INSTANCES.instance_number;
+            select distinct(value/1024/1024/1024) into V_SHARED_POOL_SIZE from DBA_HIST_PARAMETER where snap_id between V_MIN_SNAP_ID and V_MAX_SNAP_ID and parameter_name = 'shared_pool_size' and INSTANCE_NUMBER = V_UNQ_INSTANCES.instance_number;
+            select distinct(value/1024/1024/1024) into V_BUFFER_CACHE_SIZE from DBA_HIST_PARAMETER where snap_id between V_MIN_SNAP_ID and V_MAX_SNAP_ID and parameter_name = 'db_cache_size' and INSTANCE_NUMBER = V_UNQ_INSTANCES.instance_number;
+            select distinct(value/1024/1024/1024) into V_SGA_MAX_SIZE from DBA_HIST_PARAMETER where snap_id between V_MIN_SNAP_ID and V_MAX_SNAP_ID and parameter_name = 'sga_max_size' and INSTANCE_NUMBER = V_UNQ_INSTANCES.instance_number;
+            dbms_output.put_line('INSTANCE : '||V_UNQ_INSTANCES.instance_number||' '||V_UNQ_INSTANCES.instance_name||' CPU_COUNT '||V_CPU_COUNT||' SHARED_POOL_SIZE '||V_SHARED_POOL_SIZE||'GB DB_CACHE_SIZE '||V_BUFFER_CACHE_SIZE||'GB SGA_MAX_SIZE '||V_SGA_MAX_SIZE||'GB');
+            dbms_output.put_line('');
+        END;
+    END LOOP;
+    
+    dbms_output.put_line(chr(10));
+    dbms_output.put_line('TOP 3 WAIT CLASSES FOR TIME PERIOD '||DEFINED_STARTTIME||' to '||DEFINED_ENDTIME);
+    dbms_output.put_line('-----------------------------------------------------------------------------------------');
+
+
+    DECLARE
+    CURSOR wait_classes IS
+    select * from (select wait_class_id, wait_class, count(*) cnt from dba_hist_active_sess_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME' and wait_class_id is not null group by wait_class_id, wait_class order by 3 desc) where rownum <=3 ; 
+    wait_classes_cur wait_classes%ROWTYPE;
+    BEGIN
+        OPEN wait_classes;
+        LOOP
+        FETCH wait_classes INTO wait_classes_cur;
+        exit WHEN wait_classes%NOTFOUND;
+		    dbms_output.Put_line('WAIT CLASS : '||UPPER(wait_classes_cur.wait_class)||' HAS A WAIT COUNT OF '||UPPER(wait_classes_cur.cnt));
+        END LOOP;
+        CLOSE wait_classes;
+    END; 
+
+    dbms_output.put_line(chr(10));
+    dbms_output.put_line('TOP 5 WAIT EVENTS FOR TIME PERIOD '||DEFINED_STARTTIME||' to '||DEFINED_ENDTIME);
+    dbms_output.put_line('-------------------------------------------------------------------------------------------------');
+    DECLARE
+    CURSOR event_ids IS
+    select * from (select event_id, event, count(*) cnt from dba_hist_active_sess_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME' and wait_class_id in (select wait_class_id from (select wait_class_id, wait_class, count(*) cnt from dba_hist_active_sess_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME' and wait_class_id is not null group by wait_class_id, wait_class order by 3 desc) where rownum <=5 ) group by event_id, event order by 3 desc) where rownum <=5; 
+    event_ids_cur event_ids%ROWTYPE;
+    BEGIN
+        OPEN event_ids;
+        LOOP
+        FETCH event_ids INTO event_ids_cur;
+        exit WHEN event_ids%NOTFOUND;
+		    dbms_output.Put_line('EVENT NAME : '||UPPER(event_ids_cur.event)||' HAS A WAIT COUNT OF '||UPPER(event_ids_cur.cnt));
+        END LOOP;
+        CLOSE event_ids;
+    END; 
+
+
+
+    dbms_output.put_line(chr(10));
+    dbms_output.put_line('AFFECTED SQLs AND OBJECTS DISPLAYED BELOW FOR TIME PERIOD OF '||DEFINED_STARTTIME||' to '||DEFINED_ENDTIME);
+
+
+     OPEN sql_ids;
+     LOOP
+        FETCH sql_ids INTO sql_ids_cur;
+        exit WHEN sql_ids%NOTFOUND;
+        select owner into owner_name from dba_objects where object_id = sql_ids_cur.current_obj#;
+		select object_name into obj_name from dba_objects where object_id = sql_ids_cur.current_obj#;
+		select object_type into obj_type from dba_objects where object_id = sql_ids_cur.current_obj#;
+        select subobject_name into part_name from dba_objects where object_id = sql_ids_cur.current_obj#;
+
+        BEGIN
+            select round(avg("avg duration (sec)"),4) into MOST_RECENT_EXEC_TIME from (select * from (select a.instance_number inst_id, a.snap_id,a.plan_hash_value, to_char(begin_interval_time,'dd-mon-yy hh24:mi') btime, abs(extract(minute from (end_interval_time-begin_interval_time)) + extract(hour from (end_interval_time-begin_interval_time))*60 + extract(day from (end_interval_time-begin_interval_time))*24*60) minutes, executions_delta executions, round(ELAPSED_TIME_delta/1000000/greatest(executions_delta,1),4) "avg duration (sec)", a.OPTIMIZER_COST from dba_hist_SQLSTAT a, dba_hist_snapshot b where sql_id in sql_ids_cur.sql_id and a.snap_id=b.snap_id and b.begin_interval_time > sysdate - 60 and a.instance_number=b.instance_number order by snap_id desc, a.instance_number) where rownum <= 4);     
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN MOST_RECENT_EXEC_TIME := 'NO HISTORY';
+        END;
+
+        select count(distinct(SQL_plan_hash_value)) into V_PHV_COUNT from dba_hist_active_sess_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME' and sql_id = sql_ids_cur.sql_id and sql_plan_hash_value <> 0 ;
+
+        
+        BEGIN
+            select BTIME into MOST_RECENT_EXEC_TIME_PERIOD from (select * from (select a.instance_number inst_id, a.snap_id,a.plan_hash_value, to_char(begin_interval_time,'dd-mon-yy hh24:mi') btime, abs(extract(minute from (end_interval_time-begin_interval_time)) + extract(hour from (end_interval_time-begin_interval_time))*60 + extract(day from (end_interval_time-begin_interval_time))*24*60) minutes, executions_delta executions, round(ELAPSED_TIME_delta/1000000/greatest(executions_delta,1),4) "avg duration (sec)", a.OPTIMIZER_COST from dba_hist_SQLSTAT a, dba_hist_snapshot b where sql_id in sql_ids_cur.sql_id and a.snap_id=b.snap_id and b.begin_interval_time > sysdate - 60 and a.instance_number=b.instance_number order by snap_id desc, a.instance_number) where rownum <= 4) where rownum <=1 ;     
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN MOST_RECENT_EXEC_TIME_PERIOD := 'NO RECENT HISTORY IN PAST 60 DAYS';
+        END;
+
+        BEGIN
+            select round(avg(ELAPSED_TIME_delta/1000000/greatest(executions_delta,1)),4) into historical from dba_hist_SQLSTAT a, dba_hist_snapshot b where sql_id in sql_ids_cur.sql_id and a.snap_id=b.snap_id and b.begin_interval_time > sysdate - 60 and a.instance_number=b.instance_number;
+            IF historical is null
+            THEN
+              historical := 'NO HISTORY OF EXEC IN PAST 60 DAYS';
+            END IF;
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN historical := 'NO HISTORY OF EXEC IN PAST 60 DAYS';
+        END;
+
+
+
+
+        IF obj_type like '%PARTITION%'
+        THEN
+            select round(bytes/1024/1024/1024) into OBJECT_SIZE_GB from dba_segments where owner = owner_name and segment_name = obj_name and partition_name = part_name;
+            select round(bytes/1024/1024) into OBJECT_SIZE_MB from dba_segments where owner = owner_name and segment_name = obj_name and partition_name = part_name;  
+            select round(bytes/1024) into OBJECT_SIZE_KB from dba_segments where owner = owner_name and segment_name = obj_name and partition_name = part_name;  
+            select round(bytes) into OBJECT_SIZE_BYTES from dba_segments where owner = owner_name and segment_name = obj_name and partition_name = part_name;  
+            
+            IF obj_type like '%INDEX%'
+            THEN
+              select PCT_FREE into V_PCT_FREE from dba_ind_partitions where index_owner = owner_name and partition_name = part_name;
+              select INI_TRANS into V_INI_TRANS from dba_ind_partitions where index_owner = owner_name and partition_name = part_name;
+              select LAST_ANALYZED into V_LAST_ANALYZED from dba_ind_partitions where index_owner = owner_name and partition_name = part_name;
+            ELSE
+              select PCT_FREE into V_PCT_FREE from dba_tab_partitions where table_owner = owner_name and partition_name = part_name;
+              select PCT_USED into V_PCT_USED from dba_tab_partitions where table_owner = owner_name and partition_name = part_name;
+              select INI_TRANS into V_INI_TRANS from dba_tab_partitions where table_owner = owner_name and partition_name = part_name;
+              select LAST_ANALYZED into V_LAST_ANALYZED from dba_tab_partitions where table_owner = owner_name and partition_name = part_name;
+            END IF;
+
+
+            declare
+            v_freespace1_bytes number;
+            v_freespace2_bytes number;
+            v_freespace3_bytes number;
+            v_freespace4_bytes number;
+            v_freespace1_blocks number;
+            v_freespace2_blocks number;
+            v_freespace3_blocks number;
+            v_freespace4_blocks number;
+            v_full_bytes number;
+            v_full_blocks number;
+            v_unformatted_bytes number;
+            v_unformatted_blocks number;
+            fragmented_percentage number;
+            BEGIN
+            dbms_space.space_usage(
+            segment_owner   => owner_name,
+            segment_name    => obj_name,
+            segment_type    => obj_type,
+            partition_name  => part_name,
+            fs1_bytes               => v_freespace1_bytes,
+            fs1_blocks              => v_freespace1_blocks,
+            fs2_bytes               => v_freespace2_bytes,
+            fs2_blocks              => v_freespace2_blocks,
+            fs3_bytes               => V_freespace3_bytes,
+            fs3_blocks              => v_freespace3_blocks,
+            fs4_bytes               => v_freespace4_bytes,
+            fs4_blocks              => v_freespace4_blocks,
+            full_bytes              => v_full_bytes,
+            full_blocks     => v_full_blocks,
+            unformatted_blocks => v_unformatted_blocks,
+            unformatted_bytes => v_unformatted_bytes);
+
+            select round(((v_freespace1_bytes+v_freespace2_bytes+v_freespace3_bytes+v_freespace4_bytes)/OBJECT_SIZE_BYTES)*100) into fragmented_percentage from dual;
+
+
+
+            IF fragmented_percentage > 3 
+            THEN
+                dbms_output.put_line('');
+                dbms_output.put_line('');
+                dbms_output.put_line('---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');
+                dbms_output.put_line('SQL_ID : '||sql_ids_cur.sql_id);
+                dbms_output.put_line('PLAN_HASH_VALUE : '||sql_ids_cur.sql_plan_hash_value);
+                dbms_output.put_line('NUMBER OF PLAN_HASH_VALUES FOR SQL_ID : '||V_PHV_COUNT);
+                dbms_output.put_line('EVENT_NAME : '||UPPER(sql_ids_cur.event));
+                dbms_output.put_line('WAIT_COUNT : '||sql_ids_cur.cnt);
+                dbms_output.put_line('MOST_RECENT_EXEC_TIME AVG_EXEC_TIME SECS : '||MOST_RECENT_EXEC_TIME||'  '||MOST_RECENT_EXEC_TIME_PERIOD);
+                dbms_output.put_line('HISTORICAL AVG_EXEC_TIME SECS : '||historical);
+                dbms_output.put_line('OWNER : '||owner_name);
+                dbms_output.put_line('OBJECT_NAME : '||obj_name);
+                dbms_output.put_line('OBJECT_TYPE : '||obj_type);
+                dbms_output.put_line('PARTITION_NAME : '||part_name);
+                dbms_output.put_line('PARTITION_SIZE : '||OBJECT_SIZE_GB||'GB '||OBJECT_SIZE_MB||'MB '||OBJECT_SIZE_KB||'KB ');
+                dbms_output.put_line('PCT_FREE : '||V_PCT_FREE);
+                dbms_output.put_line('PCT_USED : '||V_PCT_USED);
+                dbms_output.put_line('INI_TRANS : '||V_INI_TRANS);
+                dbms_output.put_line('LAST_ANALYZED : '||V_LAST_ANALYZED);
+                dbms_output.put_line('EVENT_NAME : '||UPPER(sql_ids_cur.event));
+                dbms_output.put_line('WAIT_COUNT : '||sql_ids_cur.cnt);
+                dbms_output.put_line('FRAGMENTED : YES, '||fragmented_percentage||'%');
+                dbms_output.put_line('TIME PERIOD : '||DEFINED_STARTTIME||' TO '||DEFINED_ENDTIME);
+                dbms_output.put_line('Blocks with Free Space (0-25%)  = '||v_freespace1_blocks);
+                dbms_output.put_line('Blocks with Free Space (25-50%) = '||v_freespace2_blocks);
+                dbms_output.put_line('Blocks with Free Space (50-75%) = '||v_freespace3_blocks);
+                dbms_output.put_line('Blocks with Free Space (75-100%)= '||v_freespace4_blocks);
+                dbms_output.put_line('Number of Full blocks           = '||v_full_blocks);
+                dbms_output.put_line('---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');
+                dbms_output.put_line(chr(10));
+            ELSE
+                dbms_output.put_line('');
+                dbms_output.put_line('');
+                dbms_output.put_line('---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');
+                dbms_output.put_line('SQL_ID : '||sql_ids_cur.sql_id);
+                dbms_output.put_line('PLAN_HASH_VALUE : '||sql_ids_cur.sql_plan_hash_value);
+                dbms_output.put_line('NUMBER OF PLAN_HASH_VALUES FOR SQL_ID : '||V_PHV_COUNT);
+                dbms_output.put_line('EVENT_NAME : '||UPPER(sql_ids_cur.event));
+                dbms_output.put_line('WAIT_COUNT : '||sql_ids_cur.cnt);
+                dbms_output.put_line('MOST_RECENT_EXEC_TIME AVG_EXEC_TIME SECS : '||MOST_RECENT_EXEC_TIME||'  '||MOST_RECENT_EXEC_TIME_PERIOD);
+                dbms_output.put_line('HISTORICAL AVG_EXEC_TIME SECS : '||historical);
+                dbms_output.put_line('OWNER: '||owner_name);
+                dbms_output.put_line('OBJECT_NAME : '||obj_name);
+                dbms_output.put_line('OBJECT_TYPE : '||obj_type);
+                dbms_output.put_line('PARTITION_NAME : '||part_name);
+                dbms_output.put_line('PARTITION_SIZE : '||OBJECT_SIZE_GB||'GB '||OBJECT_SIZE_MB||'MB '||OBJECT_SIZE_KB||'KB ');
+                dbms_output.put_line('PCT_FREE : '||V_PCT_FREE);
+                dbms_output.put_line('PCT_USED : '||V_PCT_USED);
+                dbms_output.put_line('INI_TRANS : '||V_INI_TRANS);
+                dbms_output.put_line('LAST_ANALYZED : '||V_LAST_ANALYZED);
+                dbms_output.put_line('EVENT_NAME : '||UPPER(sql_ids_cur.event));
+                dbms_output.put_line('WAIT_COUNT : '||sql_ids_cur.cnt);
+                dbms_output.put_line('FRAGMENTED : NO, '||fragmented_percentage||'%');
+                dbms_output.put_line('TIME PERIOD : '||DEFINED_STARTTIME||' TO '||DEFINED_ENDTIME);
+                dbms_output.put_line('Blocks with Free Space (0-25%)  = '||v_freespace1_blocks);
+                dbms_output.put_line('Blocks with Free Space (25-50%) = '||v_freespace2_blocks);
+                dbms_output.put_line('Blocks with Free Space (50-75%) = '||v_freespace3_blocks);
+                dbms_output.put_line('Blocks with Free Space (75-100%)= '||v_freespace4_blocks);
+                dbms_output.put_line('Number of Full blocks           = '||v_full_blocks);
+                dbms_output.put_line('---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');
+                dbms_output.put_line(chr(10));
+
+            END IF;
+            END;        
+        ELSE
+            select round(bytes/1024/1024/1024) into OBJECT_SIZE_GB from dba_segments where owner = owner_name and segment_name = obj_name;
+            select round(bytes/1024/1024) into OBJECT_SIZE_MB from dba_segments where owner = owner_name and segment_name = obj_name;
+            select round(bytes/1024) into OBJECT_SIZE_KB from dba_segments where owner = owner_name and segment_name = obj_name;
+            select round(bytes) into OBJECT_SIZE_BYTES from dba_segments where owner = owner_name and segment_name = obj_name;
+
+            IF obj_type like '%INDEX%'
+            THEN
+              select PCT_FREE into V_PCT_FREE from dba_indexes where owner = owner_name and index_name = obj_name;
+              select INI_TRANS into V_INI_TRANS from dba_indexes where owner = owner_name and index_name = obj_name;
+              select LAST_ANALYZED into V_LAST_ANALYZED from dba_indexes where owner = owner_name and index_name = obj_name;
+            ELSE
+              select PCT_FREE into V_PCT_FREE from dba_tables where owner = owner_name and table_name = obj_name;
+              select PCT_USED into V_PCT_USED from dba_tables where owner = owner_name and table_name = obj_name;
+              select INI_TRANS into V_INI_TRANS from dba_tables where owner = owner_name and table_name = obj_name;
+              select LAST_ANALYZED into V_LAST_ANALYZED from dba_tables where owner = owner_name and table_name = obj_name;
+            END IF;
+
+            declare
+            v_freespace1_bytes number;
+            v_freespace2_bytes number;
+            v_freespace3_bytes number;
+            v_freespace4_bytes number;
+            v_freespace1_blocks number;
+            v_freespace2_blocks number;
+            v_freespace3_blocks number;
+            v_freespace4_blocks number;
+            v_full_bytes number;
+            v_full_blocks number;
+            v_unformatted_bytes number;
+            v_unformatted_blocks number;
+            fragmented_percentage number;
+            BEGIN
+            dbms_space.space_usage(
+            segment_owner   => owner_name,
+            segment_name    => obj_name,
+            segment_type    => obj_type,
+            fs1_bytes               => v_freespace1_bytes,
+            fs1_blocks              => v_freespace1_blocks,
+            fs2_bytes               => v_freespace2_bytes,
+            fs2_blocks              => v_freespace2_blocks,
+            fs3_bytes               => V_freespace3_bytes,
+            fs3_blocks              => v_freespace3_blocks,
+            fs4_bytes               => v_freespace4_bytes,
+            fs4_blocks              => v_freespace4_blocks,
+            full_bytes              => v_full_bytes,
+            full_blocks     => v_full_blocks,
+            unformatted_blocks => v_unformatted_blocks,
+            unformatted_bytes => v_unformatted_bytes);
+
+            select round(((v_freespace1_bytes+v_freespace2_bytes+v_freespace3_bytes+v_freespace4_bytes)/OBJECT_SIZE_BYTES)*100) into fragmented_percentage from dual;
+
+            IF fragmented_percentage > 3 
+            THEN
+              
+                dbms_output.put_line('');
+                dbms_output.put_line('');
+                dbms_output.put_line('---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');
+                dbms_output.put_line('SQL_ID : '||sql_ids_cur.sql_id);
+                dbms_output.put_line('PLAN_HASH_VALUE : '||sql_ids_cur.sql_plan_hash_value);
+                dbms_output.put_line('NUMBER OF PLAN_HASH_VALUES FOR SQL_ID : '||V_PHV_COUNT);
+                dbms_output.put_line('EVENT_NAME : '||UPPER(sql_ids_cur.event));
+                dbms_output.put_line('WAIT_COUNT : '||sql_ids_cur.cnt);
+                dbms_output.put_line('MOST_RECENT_EXEC_TIME AVG_EXEC_TIME SECS : '||MOST_RECENT_EXEC_TIME||'  '||MOST_RECENT_EXEC_TIME_PERIOD);
+                dbms_output.put_line('HISTORICAL AVG_EXEC_TIME SECS : '||historical);
+                dbms_output.put_line('OWNER : '||owner_name);
+                dbms_output.put_line('OBJECT_NAME : '||obj_name);
+                dbms_output.put_line('OBJECT_TYPE : '||obj_type);
+                dbms_output.put_line('OBJECT_SIZE : '||OBJECT_SIZE_GB||'GB '||OBJECT_SIZE_MB||'MB '||OBJECT_SIZE_KB||'KB ');
+                dbms_output.put_line('PCT_FREE : '||V_PCT_FREE);
+                dbms_output.put_line('PCT_USED : '||V_PCT_USED);
+                dbms_output.put_line('INI_TRANS : '||V_INI_TRANS);
+                dbms_output.put_line('LAST_ANALYZED : '||V_LAST_ANALYZED);
+                dbms_output.put_line('EVENT_NAME : '||UPPER(sql_ids_cur.event));
+                dbms_output.put_line('WAIT_COUNT : '||sql_ids_cur.cnt);
+                dbms_output.put_line('FRAGMENTED : YES, '||fragmented_percentage||'%');
+                dbms_output.put_line('TIME PERIOD : '||DEFINED_STARTTIME||' TO '||DEFINED_ENDTIME);
+                dbms_output.put_line('Blocks with Free Space (0-25%)  = '||v_freespace1_blocks);
+                dbms_output.put_line('Blocks with Free Space (25-50%) = '||v_freespace2_blocks);
+                dbms_output.put_line('Blocks with Free Space (50-75%) = '||v_freespace3_blocks);
+                dbms_output.put_line('Blocks with Free Space (75-100%)= '||v_freespace4_blocks);
+                dbms_output.put_line('Number of Full blocks           = '||v_full_blocks);
+                dbms_output.put_line('---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');
+                dbms_output.put_line(chr(10));
+            ELSE
+
+                dbms_output.put_line('');
+                dbms_output.put_line('');
+                dbms_output.put_line('---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');
+                dbms_output.put_line('SQL_ID : '||sql_ids_cur.sql_id);
+                dbms_output.put_line('PLAN_HASH_VALUE : '||sql_ids_cur.sql_plan_hash_value);
+                dbms_output.put_line('NUMBER OF PLAN_HASH_VALUES FOR SQL_ID : '||V_PHV_COUNT);
+                dbms_output.put_line('EVENT_NAME : '||UPPER(sql_ids_cur.event));
+                dbms_output.put_line('WAIT_COUNT : '||sql_ids_cur.cnt);
+                dbms_output.put_line('MOST_RECENT_EXEC_TIME AVG_EXEC_TIME SECS : '||MOST_RECENT_EXEC_TIME||'  '||MOST_RECENT_EXEC_TIME_PERIOD);
+                dbms_output.put_line('HISTORICAL AVG_EXEC_TIME SECS : '||historical);
+                dbms_output.put_line('OWNER : '||owner_name);
+                dbms_output.put_line('OBJECT_NAME : '||obj_name);
+                dbms_output.put_line('OBJECT_TYPE : '||obj_type);
+                dbms_output.put_line('OBJECT_SIZE : '||OBJECT_SIZE_GB||'GB '||OBJECT_SIZE_MB||'MB '||OBJECT_SIZE_KB||'KB ');
+                dbms_output.put_line('PCT_FREE : '||V_PCT_FREE);
+                dbms_output.put_line('PCT_USED : '||V_PCT_USED);
+                dbms_output.put_line('INI_TRANS : '||V_INI_TRANS);
+                dbms_output.put_line('LAST_ANALYZED : '||V_LAST_ANALYZED);
+                dbms_output.put_line('EVENT_NAME : '||UPPER(sql_ids_cur.event));
+                dbms_output.put_line('WAIT_COUNT : '||sql_ids_cur.cnt);
+                dbms_output.put_line('FRAGMENTED : NO, '||fragmented_percentage||'%');
+                dbms_output.put_line('TIME PERIOD : '||DEFINED_STARTTIME||' TO '||DEFINED_ENDTIME);
+                dbms_output.put_line('Blocks with Free Space (0-25%)  = '||v_freespace1_blocks);
+                dbms_output.put_line('Blocks with Free Space (25-50%) = '||v_freespace2_blocks);
+                dbms_output.put_line('Blocks with Free Space (50-75%) = '||v_freespace3_blocks);
+                dbms_output.put_line('Blocks with Free Space (75-100%)= '||v_freespace4_blocks);
+                dbms_output.put_line('Number of Full blocks           = '||v_full_blocks);
+                dbms_output.put_line('---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');
+                dbms_output.put_line(chr(10));
+
+            END IF;
+            END;
+        END IF;
+     
+     END LOOP;
+     CLOSE sql_ids;
+END;
+/
+
+
+
+
+
+
+
