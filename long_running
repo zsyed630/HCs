@@ -1,0 +1,1314 @@
+-- Total cursors open, by session
+
+select a.value, s.username, s.sid, s.serial#
+from   v$sesstat a, v$statname b, v$session s
+where  a.statistic# = b.statistic# and s.sid=a.sid
+and    b.name = 'opened cursors current';
+
+set lines  100
+set pages  999
+ 
+column        c1     heading 'Pool |Size(M)'
+column        c2     heading 'Size|Factor'
+column        c3     heading 'Est|LC(M)  '
+column        c4     heading 'Est LC|Mem. Obj.'
+column        c5     heading 'Est|Time|Saved|(sec)'
+column        c6     heading 'Est|Parse|Saved|Factor'
+column c7     heading 'Est|Object Hits'   format 9999999999999999
+ 
+ 
+SELECT
+   shared_pool_size_for_estimate  c1,
+   shared_pool_size_factor        c2,
+   estd_lc_size                   c3,
+   estd_lc_memory_objects         c4,
+   estd_lc_time_saved                    c5,
+   estd_lc_time_saved_factor             c6,
+   estd_lc_memory_object_hits            c7
+FROM
+   v$shared_pool_advice;
+
+VMWARE OR NOT
+------------------
+dmesg |grep -i hypervisor   (linux)
+cat /sys/class/dmi/id/product_name   (linux)
+windows (systeminfo)
+solaris
+prtdiag -v | head -3
+
+cpu usage
+=====================
+top -b -o +%MEM | head -n 22
+
+swap usage
+================================
+$ find /proc -maxdepth 2 -path "/proc/[0-9]*/status" -readable -exec awk -v FS=":" '{process[$1]=$2;sub(/^[ \t]+/,"",process[$1]);} END {if(process["VmSwap"] && process["VmSwap"] != "0 kB") printf "%10s %-30s %20s\n",process["Pid"],process["Name"],process["VmSwap"]}' '{}' \; | awk '{print $(NF-1),$0}' | sort -h | cut -d " " -f2-
+
+find /proc -maxdepth 2 -path "/proc/[0-9]*/status" -readable -exec awk -v FS=":" '{process[$1]=$2;sub(/^[ \t]+/,"",process[$1]);} END {if(process["VmSwap"] && process["VmSwap"] != "0 kB") printf "%10s %-30s %20s\n",process["Pid"],process["Name"],process["VmSwap"]}' '{}' \; | awk '{print $(NF-1),$0}' | sort -hr | head | cut -d " " -f2- 
+
+find /proc -maxdepth 2 -path "/proc/[0-9]*/status" -readable -exec awk -v FS=":" -v TOTSWP="$(cat /proc/meminfo | sed  -n -e "s/^SwapTotal:[ ]*\([0-9]*\) kB/\1/p")" '{process[$1]=$2;sub(/^[ \t]+/,"",process[$1]);} END {if(process["VmSwap"] && process["VmSwap"] != "0 kB") {used_swap=process["VmSwap"];sub(/[ a-zA-Z]+/,"",used_swap);percent=(used_swap/TOTSWP*100); printf "%10s %-30s %20s %6.2f%\n",process["Pid"],process["Name"],process["VmSwap"],percent} }' '{}' \;  | awk '{print $(NF-2),$0}' | sort -hr | head | cut -d " " -f2-
+
+set serveroutput on size 1000000
+declare
+    x number;
+begin
+    for x in
+    ( select username||'('||sid||','||serial#||
+                ') ospid = ' ||  process ||
+                ' program = ' || program username,
+             to_char(LOGON_TIME,' Day HH24:MI') logon_time,
+             to_char(sysdate,' Day HH24:MI') current_time,
+             sql_address, LAST_CALL_ET
+        from gv$session
+       where status = 'ACTIVE'
+         and rawtohex(sql_address) <> '00'
+         and username is not null order by last_call_et )
+    loop
+        for y in ( select max(decode(piece,0,sql_text,null)) ||
+                          max(decode(piece,1,sql_text,null)) ||
+                          max(decode(piece,2,sql_text,null)) ||
+                          max(decode(piece,3,sql_text,null))
+                               sql_text
+                     from v$sqltext_with_newlines
+                    where address = x.sql_address
+                      and piece < 4)
+        loop
+            if ( y.sql_text not like '%listener.get_cmd%' and
+                 y.sql_text not like '%RAWTOHEX(SQL_ADDRESS)%')
+            then
+                dbms_output.put_line( '--------------------' );
+                dbms_output.put_line( x.username );
+                dbms_output.put_line( x.logon_time || ' ' ||
+                                      x.current_time||
+                                      ' last et = ' ||
+                                      x.LAST_CALL_ET);
+                dbms_output.put_line(
+                          substr( y.sql_text, 1, 250 ) );
+            end if;
+        end loop;
+    end loop;
+end;
+/
+
+SELECT chain_id, num_waiters, in_wait_secs, osid, blocker_osid, substr(wait_event_text,1,30)
+ FROM v$wait_chains;
+
+
+set pages 1000
+ set lines 120
+ set heading off
+ column w_proc format a50 tru
+ column instance format a20 tru
+ column inst format a28 tru
+ column wait_event format a50 tru
+ column p1 format a16 tru
+ column p2 format a16 tru
+ column p3 format a15 tru
+ column Seconds format a50 tru
+ column sincelw format a50 tru
+ column blocker_proc format a50 tru
+ column waiters format a50 tru
+ column chain_signature format a100 wra
+ column blocker_chain format a100 wra
+ 
+ SELECT *
+ FROM (SELECT 'Current Process: '||osid W_PROC, 'SID '||i.instance_name INSTANCE,
+ 'INST #: '||instance INST,'Blocking Process: '||decode(blocker_osid,null,'<none>',blocker_osid)||
+ ' from Instance '||blocker_instance BLOCKER_PROC,'Number of waiters: '||num_waiters waiters,
+ 'Wait Event: ' ||wait_event_text wait_event, 'P1: '||p1 p1, 'P2: '||p2 p2, 'P3: '||p3 p3,
+ 'Seconds in Wait: '||in_wait_secs Seconds, 'Seconds Since Last Wait: '||time_since_last_wait_secs sincelw,
+ 'Wait Chain: '||chain_id ||': '||chain_signature chain_signature,'Blocking Wait Chain: '||decode(blocker_chain_id,null,
+ '<none>',blocker_chain_id) blocker_chain
+ FROM v$wait_chains wc,
+ v$instance i
+ WHERE wc.instance = i.instance_number (+)
+ AND ( num_waiters > 0
+ OR ( blocker_osid IS NOT NULL
+ AND in_wait_secs > 10 ) )
+ ORDER BY chain_id,
+ num_waiters DESC)
+ WHERE ROWNUM < 101;
+
+
+
+break on report
+compute sum of mb on report
+compute sum of inuse on report
+set pagesize 50
+col mb format 999,999
+col inuse format 999,999
+select name,
+       round(sum(mb),1) mb,
+       round(sum(inuse),1) inuse
+  from (select case when name = 'buffer_cache'
+                    then 'db_cache_size'
+                    when name = 'log_buffer'
+                    then 'log_buffer'
+                    else pool
+                end name,
+                bytes/1024/1024 mb,
+                case when name <> 'free memory'
+                     then bytes/1024/1024
+                end inuse
+           from v$sgastat
+       )
+ group by name
+ order by mb desc
+/
+
+ pgrep -lf _pmon_ |while read pid pname  y ; do printf "%6s %-20s %-80s\n" $pid $pname `ls -l /proc/$pid/exe|awk '{print $11}'` ; done
+
+SELECT DISTINCT ash.sql_id,ash.session_id,
+                ash.blocking_session         blocker_ses,
+                ash.blocking_session_serial# blocker_ser,
+                ash.user_id,
+                s.sql_text,
+                ash.module,
+                ash.sample_time
+  FROM DBA_HIST_ACTIVE_SESS_HISTORY ash, gv$sql s
+ WHERE     ash.sql_id = s.sql_id
+       AND blocking_session IS NOT NULL
+       AND ash.user_id <> 0                                  -- exclude SYS user
+       AND ash.sample_time BETWEEN SYSDATE -1 AND  SYSDATE ;
+
+
+
+ 
+
+
+ select * from (select event,total_waits,total_timeouts,time_waited from gv$system_event where event not like 'SQL*Net%' and event not in ('pmon timer','rdbms ipc message','dispatcher timer','smon timer') order by time_waited desc) where rownum < 10;
+
+
+SELECT s.username,
+       sl.sid,
+       sq.executions,
+       sl.last_update_time,
+       sl.sql_id,
+       sl.sql_hash_value,
+       opname,
+       target,
+       elapsed_seconds,
+       time_remaining,
+       sq.sql_fulltext
+  FROM gv$session_longops sl
+ INNER JOIN gv$sql sq ON sq.sql_id = sl.sql_id
+ INNER JOIN gv$session s ON sl.SID = s.SID AND sl.serial# = s.serial#
+ WHERE time_remaining > 0;
+
+SELECT 
+SUBSTR(SS.USERNAME,1,8) USERNAME,
+SS.OSUSER "USER",
+AR.MODULE || ' @ ' || SS.machine CLIENT,
+SS.PROCESS PID,
+TO_CHAR(AR.LAST_LOAD_TIME, 'DD-Mon HH24:MM:SS') LOAD_TIME,
+AR.DISK_READS DISK_READS,
+AR.BUFFER_GETS BUFFER_GETS,
+SUBSTR(SS.LOCKWAIT,1,10) LOCKWAIT,
+W.EVENT EVENT,
+SS.status,
+AR.SQL_fullTEXT SQL
+FROM V$SESSION_WAIT W,
+V$SQLAREA AR,
+V$SESSION SS, 
+v$timer T
+WHERE SS.SQL_ADDRESS = AR.ADDRESS
+AND SS.SQL_HASH_VALUE = AR.HASH_VALUE
+AND SS.SID = w.SID (+)
+AND ss.STATUS = 'ACTIVE'
+AND W.EVENT != 'client message'
+ORDER BY  SS.LOCKWAIT ASC, SS.USERNAME, AR.DISK_READS DESC;
+
+COLUMN opname FORMAT A20
+COLUMN target_desc FORMAT A20
+COLUMN units FORMAT A10
+
+SELECT
+   opname,
+   target_desc,
+   sofar,
+   totalwork,
+   time_remaining,
+    units
+FROM  
+   gv$session_longops
+order by 5 ;
+
+
+SELECT
+opname,
+target,
+ROUND((sofar/totalwork),4)*100 Percentage_Complete,
+start_time,
+CEIL(time_remaining/60) Max_Time_Remaining_In_Min,
+FLOOR(elapsed_seconds/60) Time_Spent_In_Min
+FROM gv$session_longops
+WHERE sofar != totalwork;
+
+
+select sid, opname, round((sofar/totalwork)/0.01,2), time_remaining from gv$session_longops where time_remaining >0;
+
+SELECT s.sid,
+       s.serial#,
+       s.machine,
+       ROUND(sl.elapsed_seconds/60) || ':' || MOD(sl.elapsed_seconds,60) elapsed,
+       ROUND(sl.time_remaining/60) || ':' || MOD(sl.time_remaining,60) remaining,
+       ROUND(sl.sofar/sl.totalwork*100, 2) progress_pct
+FROM   v$session s,
+       v$session_longops sl
+WHERE  s.sid     = sl.sid
+AND    s.serial# = sl.serial#;
+
+
+
+SELECT 
+opname
+target,
+ROUND((sofar/totalwork),4)*100 Percentage_Complete,
+sid,
+serial#,
+start_time,
+CEIL(TIME_REMAINING  /60) MAX_TIME_REMAINING_IN_MIN,
+FLOOR(ELAPSED_SECONDS/60) TIME_SPENT_IN_MIN,
+L.inst_id,
+AR.SQL_FULLTEXT,
+AR.sql_id,
+AR.PARSING_SCHEMA_NAME,
+AR.MODULE client_tool
+FROM gV$SESSION_LONGOPS L, gV$SQLAREA AR
+WHERE L.SQL_ID = AR.SQL_ID 
+AND TOTALWORK > 0
+AND ar.users_executing > 0
+AND sofar != totalwork;
+
+
+--queries which are taking long
+
+
+SELECT 
+opname
+target,
+ROUND((sofar/totalwork),4)*100 Percentage_Complete,
+sid,
+serial#,
+start_time,
+CEIL(TIME_REMAINING  /60) MAX_TIME_REMAINING_IN_MIN,
+FLOOR(ELAPSED_SECONDS/60) TIME_SPENT_IN_MIN,
+L.inst_id,
+AR.SQL_FULLTEXT,
+AR.sql_id,
+AR.PARSING_SCHEMA_NAME,
+AR.MODULE client_tool
+FROM gV$SESSION_LONGOPS L, gV$SQLAREA AR
+WHERE L.SQL_ID = AR.SQL_ID 
+AND TOTALWORK > 0
+AND ar.users_executing > 0
+AND sofar != totalwork
+and FLOOR(ELAPSED_SECONDS/60) >= 2;
+
+
+
+
+
+SELECT 
+opname
+target,
+ROUND((sofar/totalwork),4)*100 Percentage_Complete,
+sid,
+serial#,
+start_time,
+CEIL(TIME_REMAINING  /60) MAX_TIME_REMAINING_IN_MIN,
+FLOOR(ELAPSED_SECONDS/60) TIME_SPENT_IN_MIN,
+L.inst_id,
+AR.SQL_FULLTEXT,
+AR.sql_id,
+AR.PARSING_SCHEMA_NAME,
+AR.MODULE client_tool
+FROM gV$SESSION_LONGOPS L, gV$SQLAREA AR
+WHERE L.SQL_ID = AR.SQL_ID 
+AND (((totalwork-sofar)/totalwork*100)) > 0
+AND ar.users_executing > 0
+AND sofar != totalwork;
+
+
+(((totalwork-sofar)/totalwork*100))
+
+
+col sql_text format a100
+set linesize 400
+
+SELECT l.sid, l.start_time, l.username, l.elapsed_seconds, a.sql_text, a.elapsed_time FROM gv$session_longops l, gv$sqlarea WHERE a.elapsed_time = l. elapsed_seconds AND l.elapsed_seconds > 1
+/
+
+
+
+
+
+select S.USERNAME, s.sid,s.inst_id,s.serial#, t.sql_id, sql_text
+from gv$sqltext_with_newlines t,gV$SESSION s
+where t.address =s.sql_address
+and t.hash_value = s.sql_hash_value
+and s.status = 'ACTIVE'
+and s.username <> 'SYSTEM'
+order by s.sid,t.piece
+/
+
+
+set lines 200
+col username format a20
+col sql_id format a25
+col sql_text wra
+set long 90000
+select S.USERNAME, s.sid,s.inst_id,s.serial#,s.last_call_et as secs_running,t.sql_id,t.sql_text
+from gv$sqltext_with_newlines t,gV$SESSION s
+where t.address =s.sql_address
+and t.hash_value = s.sql_hash_value
+and s.status = 'ACTIVE'
+and s.username <> 'SYSTEM'
+order by secs_running desc
+/
+
+
+
+select s.username,s.sid,s.serial#,s.last_call_et/60 mins_running,q.sql_text from gv$session s 
+join gv$sqltext_with_newlines q
+on s.sql_address = q.address
+ where status='ACTIVE'
+and type <>'BACKGROUND'
+and last_call_et> 60
+order by sid,serial#,q.piece;
+
+
+
+
+set pages 800 lines 200
+col sql_id for a13
+col operation for a20
+col object_owner for a20
+col object_type for a20
+col sql_text for a60
+select
+s.sql_id,s.PLAN_HASH_VALUE,p.operation,p.cost,p.object_owner,p.object_type,to_char(p.timestamp,'dd mon yyyy hh24:mi:ss') "Timestamp",s.sql_text
+from gv$sql_plan p, gv$sqlarea s
+where  p.PLAN_HASH_VALUE = s.PLAN_HASH_VALUE and
+s.sql_id in (select sql_id from gv$session_longops where ((totalwork-sofar)/totalwork*100) > 0 or TIME_REMAINING > 0);
+
+
+select s.username,s.sid,s.serial#,s.last_call_et/60 mins_running,q.sql_text from gv$session s 
+join gv$sqltext_with_newlines q
+on s.sql_address = q.address
+ where status='ACTIVE'
+and last_call_et> 60
+order by sid,serial#,q.piece;
+
+
+SELECT
+a.sid,
+b.spid
+FROM gv$session a, gv$process b
+WHERE a.paddr = b.addr
+and b.spid = 1874; 
+
+
+SELECT s.sid, s.serial#, s.username, s.osuser, p.spid, s.machine, p.terminal, s.program
+FROM gv$session s, v$process p
+WHERE s.paddr = p.addr
+and s.sid=1874;
+
+create index customer_idx2 ON customer(lower(user_name));
+
+create index customer_idx3 ON customer(lower(trim(last_name)));
+
+create index customer_idx4 ON customer(lower(trim(first_name)));
+
+
+--locked objects
+
+
+select 
+session_id,oracle_username
+os_user_name,
+locked_mode,
+object_name,
+object_type
+from 
+gv$locked_object a,dba_objects b
+where 
+a.object_id = b.object_id;
+
+
+Blockin Sessions
+===========================================
+ select s1.username || '@' || s1.machine
+  || ' ( SID=' || s1.sid || 'serial # '||s1.serial#||'@'||s1.inst_id||' )  is blocking '
+  || s2.username || '@' || s2.machine || ' ( SID=' || s2.sid || ' ) ' AS blocking_status
+from gv$lock l1, gv$session s1, gv$lock l2, gv$session s2
+where s1.sid=l1.sid and s2.sid=l2.sid
+and l1.BLOCK=1 and l2.request > 0
+ and l1.id1 = l2.id1
+ and l2.id2 = l2.id2 
+and rownum <20;
+
+ select 'alter system kill session '||chr(39)|| s1.sid ||','||s1.serial#||',@'||s1.inst_id||chr(39)||' immediate;'
+from gv$lock l1, gv$session s1, gv$lock l2, gv$session s2
+where s1.sid=l1.sid and s2.sid=l2.sid
+and l1.BLOCK=1 and l2.request > 0
+ and l1.id1 = l2.id1
+ and l2.id2 = l2.id2 
+and rownum <20;
+
+
+
+select distinct(s1.machine)  || ' ( SID=' || s1.sid || ' )  is blocking '
+  || s2.username || '@' || s2.machine || ' ( SID=' || s2.sid || ' ) ' AS blocking_status
+from gv$lock l1, gv$session s1, gv$lock l2, gv$session s2
+where s1.sid=l1.sid and s2.sid=l2.sid
+and l1.BLOCK=1 and l2.request > 0
+ and l1.id1 = l2.id1
+ and l2.id2 = l2.id2 ;
+
+
+select distinct(s1.machine)
+from gv$lock l1, gv$session s1, gv$lock l2, gv$session s2
+where s1.sid=l1.sid and s2.sid=l2.sid
+and l1.BLOCK=1 and l2.request > 0
+ and l1.id1 = l2.id1
+ and l2.id2 = l2.id2 ;
+
+
+
+ select sid,serial#,inst_id from gv$session where sid = 1196;
+
+
+ select owner||'.'||object_name obj
+,oracle_username||' ('||s.status||')' oruser
+,os_user_name osuser
+,machine computer
+,l.process unix
+,''''||s.sid||','||s.serial#||'''' ss
+,r.name rs
+,to_char(s.logon_time,'yyyy/mm/dd hh24:mi:ss') time
+from gv$locked_object l
+,dba_objects o
+,gv$session s
+,gv$transaction t
+,v$rollname r
+where l.object_id = o.object_id
+and s.sid=l.session_id
+and s.taddr=t.addr
+and t.xidusn=r.usn
+order by osuser, ss, obj;
+
+
+
+SELECT vh.sid locking_sid,
+ vs.status status,
+ vs.program program_holding,
+ vw.sid waiter_sid,
+ vsw.program program_waiting
+FROM v$lock vh,
+ gv$lock vw,
+ gv$session vs,
+ gv$session vsw
+WHERE     (vh.id1, vh.id2) IN (SELECT id1, id2
+ FROM gv$lock
+ WHERE request = 0
+ INTERSECT
+ SELECT id1, id2
+ FROM gv$lock
+ WHERE lmode = 0)
+ AND vh.id1 = vw.id1
+ AND vh.id2 = vw.id2
+ AND vh.request = 0
+ AND vw.lmode = 0
+ AND vh.sid = vs.sid
+ AND vw.sid = vsw.sid;
+
+
+ SELECT s.username,
+       s.sid,
+       s.serial#,
+       s.sql_id,
+       t.used_ublk,
+       t.used_urec,
+       rs.segment_name,
+       r.rssize,
+       r.status
+FROM   gv$transaction t,
+       gv$session s,
+       gv$rollstat r,
+       dba_rollback_segs rs
+WHERE  s.saddr = t.ses_addr
+AND    t.xidusn = r.usn
+AND   rs.segment_id = t.xidusn
+ORDER BY t.used_ublk DESC
+/
+
+
+SET LINESIZE 100
+COLUMN spid FORMAT A10
+COLUMN username FORMAT A10
+COLUMN program FORMAT A45
+
+SELECT s.inst_id,
+       s.sid,
+       s.serial#,
+       p.spid,
+       s.username,
+       s.program
+FROM   gv$session s
+       JOIN gv$process p ON p.addr = s.paddr AND p.inst_id = s.inst_id
+WHERE  s.schemaname='ITSWAT_RO';
+
+
+
+
+
+
+select vs.sid,vs.serial#,vs.username,vs.schemaname,vp.spid from v$session vs,v$process vp where vs.paddr=vp.addr and spid=5278;
+
+
+
+select sesion.sid,
+       sesion.username,
+       optimizer_mode,
+       hash_value,
+       address,
+       cpu_time,
+       elapsed_time,
+       sql_text
+  from v$sqlarea sqlarea, v$session sesion
+ where sesion.sql_hash_value = sqlarea.hash_value
+   and sesion.sql_address    = sqlarea.address
+   and sesion.username is not null
+   and sesion.sid=1001;
+
+
+
+SPID           SID    SERIAL# USERNAME     OSUSER
+------------------------ ------- ---------- -------------------- ---------------
+2743           954      18533 S2FIG_APP    jboss
+
+SQL> col sid format 999999
+col username format a20
+col osuser format a15
+select b.spid,a.sid, a.serial#,a.username, a.osuser
+from v$session a, v$process b
+where a.paddr= b.addr
+and b.spid='&spid'
+order by b.spid;
+SQL> SQL> SQL>   2    3    4    5  Enter value for spid:
+old   4: and b.spid='&spid'
+new   4: and b.spid=''
+
+no rows selected
+
+SQL>
+SQL> /
+Enter value for spid: 2755
+old   4: and b.spid='&spid'
+new   4: and b.spid='2755'
+
+SPID           SID    SERIAL# USERNAME     OSUSER
+------------------------ ------- ---------- -------------------- ---------------
+2755           787      49487 S2FIG_APP    jboss
+
+SQL>
+SQL> /
+Enter value for spid: 17562
+old   4: and b.spid='&spid'
+new   4: and b.spid='17562'
+
+SPID           SID    SERIAL# USERNAME     OSUSER
+------------------------ ------- ---------- -------------------- ---------------
+17562          957      39379 S2FIG_APP    jboss
+
+
+
+
+/*************************************************************************
+SQL Monitor
+**************************************************************************/
+set lines 1000 pages 9999 
+column sid format 9999 
+column serial for 999999
+column status format a15
+column username format a10 
+column sql_text format a80
+column module format a30
+col program for a30
+col SQL_EXEC_START for a20
+
+SELECT * FROM
+       (SELECT status,inst_id,sid,SESSION_SERIAL# as Serial,username,sql_id,SQL_PLAN_HASH_VALUE,
+     MODULE,program,
+         TO_CHAR(sql_exec_start,'dd-mon-yyyy hh24:mi:ss') AS sql_exec_start,
+         ROUND(elapsed_time/1000000)                      AS "Elapsed (s)",
+         ROUND(cpu_time    /1000000)                      AS "CPU (s)",
+         substr(sql_text,1,30) sql_text
+       FROM gv$sql_monitor where status='EXECUTING' and module not like '%emagent%' 
+       ORDER BY sql_exec_start  desc
+       );
+
+*** statistics of objects of a specific sql id 
+
+set lines 300 set pages 300
+col table_name for a40
+col owner for a30 
+select distinct owner, table_name, STALE_STATS, last_analyzed, stattype_locked
+  from dba_tab_statistics
+  where (owner, table_name) in
+  (select distinct owner, table_name
+          from dba_tables
+          where ( table_name)
+          in ( select object_name
+                  from gv$sql_plan
+                  where upper(sql_id) = upper('&sql_id') and object_name is not null))
+  --and STALE_STATS='YES'
+/
+
+
+*** Table Fragmentation
+
+select 
+   table_name,round((blocks*8),2) "size (kb)" , 
+   round((num_rows*avg_row_len/1024),2) "actual_data (kb)",
+   (round((blocks*8),2) - round((num_rows*avg_row_len/1024),2)) "wasted_space (kb)"
+from 
+   dba_tables
+where  owner='&OWNER' and table_name='&TABLE_NAME' and 
+   (round((blocks*8),2) > round((num_rows*avg_row_len/1024),2))
+order by 4 desc;
+
+
+
+
+top 10 queries from v$active_session_history
+
+select * from (
+ select
+ SQL_ID , 
+ sum(decode(session_state,'ON CPU',1,0)) as CPU,
+ sum(decode(session_state,'WAITING',1,0)) - sum(decode(session_state,'WAITING', decode(wait_class, 'User I/O',1,0),0)) as WAIT,
+ sum(decode(session_state,'WAITING', decode(wait_class, 'User I/O',1,0),0)) as IO,
+ sum(decode(session_state,'ON CPU',1,1)) as TOTAL
+ from gv$active_session_history
+ where SQL_ID is not NULL
+ group by sql_id
+ order by sum(decode(session_state,'ON CPU',1,1))   desc
+ )
+where rownum <11;
+
+
+Top 5 wait events from v$active_session_history
+
+select * from (
+ select
+ WAIT_CLASS ,
+ EVENT,
+ count(sample_time) as EST_SECS_IN_WAIT
+ from v$active_session_history
+ where sample_time between sysdate - interval '1' hour and sysdate
+ group by WAIT_CLASS,EVENT
+ order by count(sample_time) desc
+ )
+where rownum <7;
+
+
+SELECT dba_objects.owner,dba_objects.object_name,
+dba_objects.object_type,
+active_session_history.event,
+SUM(active_session_history.wait_time +
+active_session_history.time_waited) ttl_wait_time
+FROM v$active_session_history active_session_history,
+dba_objects
+WHERE active_session_history.sample_time BETWEEN SYSDATE - interval '1' minute AND SYSDATE
+AND active_session_history.current_obj# = dba_objects.object_id
+GROUP BY dba_objects.owner,dba_objects.object_name, dba_objects.object_type, active_session_history.event
+ORDER BY 4 DESC;
+
+
+Current running SQLs
+==========================
+
+col cpu_time format 9999999999999999
+col elapsed_time format 99999999999999
+col username format a20
+col sql_text format a70
+
+select sesion.sid,
+       sesion.inst_id,
+       sesion.username,
+       hash_value,
+       cpu_time/1000000 as cpu_secs,
+       elapsed_time/1000000 as elapsed_secs,
+       sql_text
+  from gv$sqlarea sqlarea, gv$session sesion
+ where sesion.sql_hash_value = sqlarea.hash_value
+   and sesion.sql_address    = sqlarea.address
+   and sesion.username is not null ;
+
+
+-- Top 10 CPU consumers in last 60 minutes
+select * from
+(
+select session_id, session_serial#, count(*)
+from v$active_session_history
+where session_state= 'ON CPU' and
+ sample_time > sysdate - interval '10' minute
+group by session_id, session_serial#
+order by count(*) desc
+)
+where rownum <= 10;
+
+-- Top 10 waiting sessions in last 60 minutes
+select * from
+(
+select session_id, session_serial#,event,count(*)
+from v$active_session_history
+where session_state='WAITING'  and
+ sample_time >  sysdate - interval '10' minute
+group by session_id, session_serial#,event
+order by count(*) desc
+)
+where rownum <= 10;
+
+Top Recent Wait Events
+
+col EVENT format a60 
+
+select * from (
+select active_session_history.event,
+sum(active_session_history.wait_time +
+active_session_history.time_waited) ttl_wait_time
+from v$active_session_history active_session_history
+where active_session_history.event is not null
+group by active_session_history.event
+order by 2 desc)
+where rownum < 6
+/
+
+
+
+select * from (
+select active_session_history.sql_id,
+ dba_users.username,
+ sqlarea.sql_text,
+sum(active_session_history.wait_time +
+active_session_history.time_waited) ttl_wait_time
+from v$active_session_history active_session_history,
+v$sqlarea sqlarea,
+ dba_users
+where 
+active_session_history.sample_time between sysdate -  1/24  and sysdate
+  and active_session_history.sql_id = sqlarea.sql_id
+and active_session_history.user_id = dba_users.user_id
+ group by active_session_history.sql_id,sqlarea.sql_text, dba_users.username
+ order by 4 desc )
+where rownum < 6;
+
+
+---Locked Objects
+
+SET LINESIZE 500
+SET PAGESIZE 1000
+SET VERIFY OFF
+
+COLUMN owner FORMAT A20
+COLUMN username FORMAT A20
+COLUMN object_owner FORMAT A20
+COLUMN object_name FORMAT A30
+COLUMN locked_mode FORMAT A15
+
+
+SELECT lo.inst_id,
+       lo.session_id AS sid,
+       s.serial#,
+       NVL(lo.oracle_username, '(oracle)') AS username,
+       o.owner AS object_owner,
+       o.object_name,
+       Decode(lo.locked_mode, 0, 'None',
+                             1, 'Null (NULL)',
+                             2, 'Row-S (SS)',
+                             3, 'Row-X (SX)',
+                             4, 'Share (S)',
+                             5, 'S/Row-X (SSX)',
+                             6, 'Exclusive (X)',
+                             lo.locked_mode) locked_mode,
+       lo.os_user_name
+FROM   gv$locked_object lo
+       JOIN dba_objects o ON o.object_id = lo.object_id
+       JOIN gv$session s ON lo.session_id = s.sid
+where rownum < 15
+ORDER BY 1, 2, 3, 4;
+
+
+
+
+
+
+set pages 50000 lines 32767
+col username format a12
+col sid format 9999
+col state format a15
+col event format a50
+col wait_time format 99999999
+set pagesize 100
+set linesize 120
+
+select s.inst_ID,s.sid, s.username, se.event, se.state, se.wait_time
+from gv$session s, gv$session_wait se
+where s.sid=se.sid
+and se.event not like 'SQL*Net%'
+and se.event not like '%rdbms%'
+and s.username is not null
+order by se.wait_time
+/
+
+
+-- Active SEssions in wait 
+
+SET LINESIZE 250
+SET PAGESIZE 1000
+
+COLUMN username FORMAT A15
+COLUMN sid FORMAT 99999
+COLUMN serial# FORMAT 9999999
+col process_id format a10
+COLUMN wait_class FORMAT A15
+COLUMN state FORMAT A19
+
+
+SELECT a.schemaname username,
+       a.inst_id,
+       a.sid,
+       a.serial#,
+       d.spid AS process_id,
+       a.wait_class,
+       a.event,
+       a.seconds_in_wait,
+       a.state,
+       a.blocking_session,
+       a.blocking_session_status,
+       a.module,
+       TO_CHAR(a.logon_Time,'DD-MON-YYYY HH24:MI:SS') AS logon_time
+FROM   gv$session a,
+       gv$process d
+WHERE  a.paddr  = d.addr
+AND    a.status = 'ACTIVE'
+and    a.wait_class <> 'Idle'
+and rownum < 15
+ORDER BY 1,2;
+
+
+SET VERIFY OFF
+
+SELECT NVL(a.event, 'ON CPU') AS event,
+       COUNT(*) AS total_wait_time
+FROM   v$active_session_history a
+WHERE  a.sample_time > SYSDATE - interval '1' hour 
+GROUP BY a.event
+ORDER BY total_wait_time DESC;
+
+
+
+
+
+
+
+
+--redo generation by day 0 
+
+
+SET VERIFY OFF PAGESIZE 30
+
+WITH hours AS (
+  SELECT TRUNC(SYSDATE) - 0 + ((level-1)/24) AS hours
+  FROM   dual
+  CONNECT BY level < = 24
+)
+SELECT h.hours AS date_hour,
+       ROUND(SUM(blocks * block_size)/1024/1024/1024,2) size_gb
+FROM   hours h
+       LEFT OUTER JOIN v$archived_log al ON h.hours = TRUNC(al.first_time, 'HH24')
+GROUP BY h.hours
+ORDER BY h.hours;
+
+
+
+
+
+   select
+     ash.SQL_ID ,
+     sum(decode(ash.session_state,'ON CPU',1,0))     "CPU",
+     sum(decode(ash.session_state,'WAITING',1,0))    -
+     sum(decode(ash.session_state,'WAITING', decode(en.wait_class, 'User I/O',1,0),0))    "WAIT" ,
+     sum(decode(ash.session_state,'WAITING', decode(en.wait_class, 'User I/O',1,0),0))    "IO" ,
+     sum(decode(ash.session_state,'ON CPU',1,1))     "TOTAL"
+from gv$active_session_history ash,
+         v$event_name en
+where SQL_ID is not NULL  and en.event#=ash.event#
+group by sql_id
+order by sum(decode(session_state,'ON CPU',1,1))   desc;
+
+
+
+
+
+SELECT instance_number, sql_opname,event, p1, p2, p3,  current_obj#,  COUNT (*) cnt
+FROM dba_hist_active_sess_history
+WHERE sample_time BETWEEN TIMESTAMP '2020-02-24  11:30:00'
+      AND TIMESTAMP '2020-02-24  09:00:00'
+  AND wait_class = 'Cluster'
+GROUP BY instance_number, event, sql_opname,p1, p2, p3, current_obj#
+ORDER BY cnt DESC
+ /
+
+
+SELECT *
+ FROM (SELECT 'Current Process: '||osid W_PROC, 'SID '||i.instance_name INSTANCE,
+ 'INST #: '||instance INST,'Blocking Process: '||decode(blocker_osid,null,'<none>',blocker_osid)||
+ ' from Instance '||blocker_instance BLOCKER_PROC,'Number of waiters: '||num_waiters waiters,
+ 'Wait Event: ' ||wait_event_text wait_event, 'P1: '||p1 p1, 'P2: '||p2 p2, 'P3: '||p3 p3,
+ 'Seconds in Wait: '||in_wait_secs Seconds, 'Seconds Since Last Wait: '||time_since_last_wait_secs sincelw,
+ 'Wait Chain: '||chain_id ||': '||chain_signature chain_signature,'Blocking Wait Chain: '||decode(blocker_chain_id,null,
+ '<none>',blocker_chain_id) blocker_chain
+ FROM gv$wait_chains wc,
+ gv$instance i
+ WHERE wc.instance = i.instance_number (+)
+ AND ( num_waiters > 0
+ OR ( blocker_osid IS NOT NULL
+ AND in_wait_secs > 10 ) )
+ ORDER BY chain_id,
+ num_waiters DESC)
+ WHERE ROWNUM < 101;
+
+
+
+select * from (
+select
+SQL_ID,
+WAIT_CLASS,
+EVENT,
+     session_id,
+	 session_serial#,
+     program,
+	 module,
+	 action,
+   SQL_OPNAME,
+     sum(decode(session_state,'WAITING',0,1)) "CPU",
+     sum(decode(session_state,'WAITING',1,0)) - sum(decode(session_state,'WAITING',decode(wait_class,'User I/O',1,0),0)) "WAITING" ,
+     sum(decode(session_state,'WAITING',decode(wait_class,'User I/O',1,0),0)) "IO" ,
+     sum(decode(session_state,'WAITING',1,1)) "TOTAL"
+from gv$active_session_history 
+where session_type='FOREGROUND'
+group by sql_id,wait_class,event,session_id,session_serial#,module,action,program,SQL_OPNAME
+order by sum(decode(session_state,'WAITING',1,1)) desc)
+where rownum <11;
+
+SQL> select 'alter system kill session '||chr(39)||sid||','||serial#||',@'||inst_id||chr(39)||' immediate;' from gv$session where sql_id in (select distinct(sql_id) from v$sql where sql_text like '%searchrestrictions item_t0 WHERE%');
+
+'ALTERSYSTEMKILLSESSION'||CHR(39)||SID||','||SERIAL#||',@'||INST_ID||CHR(39)||'I
+--------------------------------------------------------------------------------
+alter system kill session '3217,5024,@2' immediate;
+alter system kill session '4575,27014,@2' immediate;
+
+SQL> select machine,schemaname from gv$session where sql_id in (select distinct(sql_id) from v$sql where sql_text like '%searchrestrictions item_t0 WHERE%');
+
+no rows selected
+
+SQL> select 'alter system kill session '||chr(39)||sid||','||serial#||',@'||inst_id||chr(39)||' immediate;' from gv$session where sql_id in (select distinct(sql_id) from v$sql where sql_text like '%searchrestrictions item_t0 WHERE%');
+
+'ALTERSYSTEMKILLSESSION'||CHR(39)||SID||','||SERIAL#||',@'||INST_ID||CHR(39)||'I
+--------------------------------------------------------------------------------
+alter system kill session '463,58318,@1' immediate;
+alter system kill session '3989,16478,@2' immediate;
+
+'%item_t0.query FROM searchrestrictions%'
+
+SQL ID HISTORY PLAN HASH VALUE PLUS DURATION PLUS EXECUTIONS
+=====================
+select a.instance_number inst_id, a.snap_id,a.plan_hash_value, to_char(begin_interval_time,'dd-mon-yy hh24:mi') btime, abs(extract(minute from (end_interval_time-begin_interval_time)) + extract(hour from (end_interval_time-begin_interval_time))*60 + extract(day from (end_interval_time-begin_interval_time))*24*60) minutes,
+executions_delta executions, round(ELAPSED_TIME_delta/1000000/greatest(executions_delta,1),4) "avg duration (sec)" from dba_hist_SQLSTAT a, dba_hist_snapshot b
+where a.sql_id = '&1' and a.snap_id=b.snap_id
+and a.instance_number=b.instance_number
+order by snap_id , a.instance_number;
+
+select avg(executions) from (select a.instance_number inst_id, a.snap_id,a.plan_hash_value, to_char(begin_interval_time,'dd-mon-yy hh24:mi') btime, abs(extract(minute from (end_interval_time-begin_interval_time)) + extract(hour from (end_interval_time-begin_interval_time))*60 + extract(day from (end_interval_time-begin_interval_time))*24*60) minutes,
+executions_delta executions, round(ELAPSED_TIME_delta/1000000/greatest(executions_delta,1),4) "avg duration (sec)" from dba_hist_SQLSTAT a, dba_hist_snapshot b
+where a.sql_id = '&1' and a.snap_id=b.snap_id
+and a.instance_number=b.instance_number
+order by snap_id , a.instance_number);
+
+
+
+select a.instance_number inst_id, a.snap_id,a.plan_hash_value, to_char(begin_interval_time,'dd-mon-yy hh24:mi') btime, abs(extract(minute from (end_interval_time-begin_interval_time)) + extract(hour from (end_interval_time-begin_interval_time))*60 + extract(day from (end_interval_time-begin_interval_time))*24*60) minutes,
+executions_delta executions, round(ELAPSED_TIME_delta/1000000/greatest(executions_delta,1),4) "avg duration (sec)" from dba_hist_SQLSTAT a, dba_hist_snapshot b
+where a.sql_id = '&1' and a.snap_id=b.snap_id
+and a.instance_number=b.instance_number
+order by snap_id , a.instance_number;
+
+
+select distinct snap_id, sum(executions) from (select distinct(a.snap_id),sum(executions_delta) executions from dba_hist_SQLSTAT a, dba_hist_snapshot b
+where a.sql_id = '&1'  and a.snap_id=b.snap_id
+and a.instance_number=b.instance_number group by a.snap_id
+order by snap_id) group by snap_id,executions order by 1;
+
+
+select to_char(begin_interval_time,'mon-dd-yy hh24:mi') btime from dba_hist_snapshot where snap_id between 89309 and 93318;
+
+select distinct snap_id,to_char(begin_interval_time,'mon-dd-yy hh24:mi') btime from dba_hist_snapshot where snap_id between 89309 and 93318 order by 1
+
+select distinct to_char(begin_interval_time,'mon-dd-yy hh24:mi') btime from dba_hist_snapshot where snap_id between 89309 and 93318 order by snap_id
+
+select btime from (select distinct b.snap_id,to_char(a.begin_interval_time,'mon-dd-yy hh24:mi') btime from dba_hist_snapshot a, dba_hist_sqlstat b where a.snap_id = b.snap_id and b.snap_id between 89309 and 93318 and b.sql_id = '&1'  order by 1);
+
+
+select distinct snap_id, btime||','||sum(executions)  from (select a.instance_number inst_id, a.snap_id,a.plan_hash_value, to_char(begin_interval_time,'mon-dd-yy hh24:mi') btime, abs(extract(minute from (end_interval_time-begin_interval_time)) + extract(hour from (end_interval_time-begin_interval_time))*60 + extract(day from (end_interval_time-begin_interval_time))*24*60) minutes,
+executions_delta executions, round(ELAPSED_TIME_delta/1000000/greatest(executions_delta,1),4) "avg duration (sec)" from dba_hist_SQLSTAT a, dba_hist_snapshot b
+where a.sql_id = '&1'  and a.snap_id=b.snap_id 
+and a.instance_number=b.instance_number group by a.snap_id
+order by snap_id ) group by snap_id ,btime, executions order by 1;
+
+juan, nicole, octavio, tom, mark gardner, jeff refka, jill, murty, dennis, asad 
+
+-- troubleshooting current dynamic views
+
+col parsing_schema_name format a30
+col sql_plan_baseline format a30
+col module format a30
+col time format a50
+set lines 200
+select inst_id,sql_id,plan_hash_value,child_number,to_char(last_active_time,'Mon/DD/YYYY HH24:MI:SS' ) time,executions,
+round(elapsed_time/executions/1000/1000,4) avg_elapsed_time from gv$sql
+where sql_id in ('&sql_id') order by time asc;
+
+select sample_time from gv$active_session_history where sql_id = '6wbz0zr1qj01x' and rownum < 10 order by 1 desc;
+
+
+select count(*) from gv$active_session_history where sql_id = '6wbz0zr1qj01x' and sample_time 
+
+SQL> 1
+  1* select 'alter system kill session '||chr(39)||sid||','||serial#||',@'||inst_id||chr(39)||' immediate;' from gv$session where sql_id = ('8y71r999fv528','g5ymgqjqnkv19');
+SQL>
+
+select 'alter system kill session '||chr(39)||sid||','||serial#||',@'||inst_id||chr(39)||' immediate;' from gv$session where sql_id = '1xftn96cykn4p';
+
+col parsing_schema_name format a30
+col sql_plan_baseline format a30
+col module format a30
+col time format a50
+set lines 200
+select inst_id,sql_id,plan_hash_value,child_number,to_char(last_active_time,'Mon/DD/YYYY HH24:MI:SS' ) time,executions,
+round(elapsed_time/executions/1000/1000,4) avg_elapsed_time,CHILD_NUMBER from gv$sql
+where sql_id in ('&sql_id') order by time asc;
+
+
+SELECT * from TABLE(DBMS_XPLAN.DISPLAY_CURSOR('&sqlid',&child_number));
+
+col sql_opname format a30 
+ col event format a50
+select * from (SELECT instance_number,sql_id, sql_opname,event, p1, p2, p3,current_obj#,    COUNT (*) cnt
+FROM dba_hist_active_sess_history, dba_objects a
+WHERE sample_time BETWEEN TIMESTAMP '2021-11-18  10:10:00'
+       AND TIMESTAMP '2021-11-18  10:55:00'
+  AND wait_class = 'Cluster' and current_obj# = a.object_id
+GROUP BY instance_number, event,sql_id, sql_opname,p1, p2, p3, current_obj#
+ORDER BY cnt DESC) where rownum <=30;
+
+select segment_name,segment_type
+from dba_extents
+where file_id = 54 
+and 1540577 between block_id and block_id + blocks-1;
+
+
+define STARTTIME='2021-10-22  10:30:00';
+define ENDTIME='2021-10-22  15:00:00';
+
+select * from (select * from dba_hist_sqlbind where snap_id between (select min(snap_id) from dba_hist_active_sess_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME') and (select max(snap_id) from dba_hist_active_sess_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME') and sql_id in ('8gg9va5gy9k29','6wm86fbghy5n1'));
+
+select * from (SELECT instance_number, sql_opname,event, p1, p2, p3,current_obj#
+FROM dba_hist_active_sess_history, dba_objects a
+WHERE sample_time BETWEEN TIMESTAMP '2021-10-19  09:53:00'
+       AND TIMESTAMP '2021-10-19  10:22:00'
+  AND wait_class = 'Cluster' and current_obj# = a.object_id
+GROUP BY instance_number, event, sql_opname,p1, p2, p3, current_obj#
+ORDER BY cnt DESC) where rownum <=30;
+
+
+SELECT sql_id, SQL_PLAN_HASH_VALUE, SQL_PLAN_LINE_ID, COUNT (*) cnt
+FROM dba_hist_active_sess_history h
+WHERE  sample_time BETWEEN TIMESTAMP '2021-10-19  09:53:00'
+       AND TIMESTAMP '2021-10-19  10:22:00'
+  AND wait_class = 'Cluster' and event='gc buffer busy acquire'
+GROUP BY sql_id, SQL_PLAN_HASH_VALUE, SQL_PLAN_LINE_ID
+ORDER BY cnt DESC;
+
+
+
+-- Create tuning task
+set long 1000000000
+DECLARE
+l_sql_tune_task_id VARCHAR2(100);
+BEGIN
+l_sql_tune_task_id := DBMS_SQLTUNE.create_tuning_task (
+sql_id => '&1',
+scope => DBMS_SQLTUNE.scope_comprehensive,
+time_limit => 500,
+task_name => '&2_tuning_task_1',
+description => 'Tuning task for statement apwfwjhgc9sk8');
+DBMS_OUTPUT.put_line('l_sql_tune_task_id: ' || l_sql_tune_task_id);
+END;
+/
+-- Execute tuning task
+EXEC DBMS_SQLTUNE.execute_tuning_task(task_name => '&2_tuning_task_1');
+-- Generate report
+SET LONG 10000000;
+SET PAGESIZE 100000000
+SET LINESIZE 200
+
+SELECT DBMS_SQLTUNE.report_tuning_task('&2_tuning_task_1') AS recommendations FROM dual;
+
+
+
+
+
+
+CONTENTION WAIT_CHAINS
+==============================
+SELECT chain_id, num_waiters, in_wait_secs, osid, blocker_osid, substr(wait_event_text,1,30)
+ FROM v$wait_chains;
+
+
+set pages 1000
+ set lines 120
+ set heading off
+ column w_proc format a50 tru
+ column instance format a20 tru
+ column inst format a28 tru
+ column wait_event format a50 tru
+ column p1 format a16 tru
+ column p2 format a16 tru
+ column p3 format a15 tru
+ column Seconds format a50 tru
+ column sincelw format a50 tru
+ column blocker_proc format a50 tru
+ column waiters format a50 tru
+ column chain_signature format a100 wra
+ column blocker_chain format a100 wra
+ 
+ SELECT *
+ FROM (SELECT 'Current Process: '||osid W_PROC, 'SID '||i.instance_name INSTANCE,
+ 'INST #: '||instance INST,'Blocking Process: '||decode(blocker_osid,null,'<none>',blocker_osid)||
+ ' from Instance '||blocker_instance BLOCKER_PROC,'Number of waiters: '||num_waiters waiters,
+ 'Wait Event: ' ||wait_event_text wait_event, 'P1: '||p1 p1, 'P2: '||p2 p2, 'P3: '||p3 p3,
+ 'Seconds in Wait: '||in_wait_secs Seconds, 'Seconds Since Last Wait: '||time_since_last_wait_secs sincelw,
+ 'Wait Chain: '||chain_id ||': '||chain_signature chain_signature,'Blocking Wait Chain: '||decode(blocker_chain_id,null,
+ '<none>',blocker_chain_id) blocker_chain
+ FROM v$wait_chains wc,
+ v$instance i
+ WHERE wc.instance = i.instance_number (+)
+ AND ( num_waiters > 0
+ OR ( blocker_osid IS NOT NULL
+ AND in_wait_secs > 10 ) )
+ ORDER BY chain_id,
+ num_waiters DESC)
+ WHERE ROWNUM < 101;
+
+
+
+select * from (select sql_id, INVALIDATIONS_TOTAL, INVALIDATIONS_DELTA,version_count from dba_hist_sqlstat where snap_id between 157997 and 158000 and INVALIDATIONS_DELTA>0 and sql_id = '0arv91ymdhhmq' order by 3 desc) 
+
+select * from (select * from dba_hist_sqlstat where snap_id between 157997 and 158000 and sql_id = '0arv91ymdhhmq' order by 3 desc) order by 3 desc --where rownum<=10	null
+
+
+alter session set sql_trace = TRUE ;
+alter system set events 'sql_trace [sql:05jvq7gudkdwj] wait=true,bind=true';
+alter system set events 'trace[sql_optimizer.*] [sql:05jvq7gudkdwj]';
+
+alter system set events 'sql_trace off';
+alter system set events 'trace[sql_optimizer.*] off';
+
+
+Exadata Critical Issues (Doc ID 1270094.1)	
+-------CURSORS
+
+select
+'session_cached_cursors' parameter,
+lpad(value, 5) value,
+decode(value, 0, ' n/a', to_char(100 * used / value, '990') || '%') usage
+from
+( select
+max(s.value) used
+from
+gv$statname n,
+gv$sesstat s
+where
+n.name = 'session cursor cache count' and
+s.statistic# = n.statistic#
+),
+( select
+value
+from
+gv$parameter
+where
+name = 'session_cached_cursors'
+)
+union all
+select
+'open_cursors',
+lpad(value, 5),
+to_char(100 * used / value, '990') || '%'
+from
+( select
+max(sum(s.value)) used
+from
+gv$statname n,
+gv$sesstat s
+where
+n.name in ('opened cursors current') and
+s.statistic# = n.statistic#
+group by
+s.sid
+),
+( select
+value
+from
+gv$parameter
+where
+name = 'open_cursors'
+)
+/
+
+
+select * from DBA_HIST_SYSSTAT where stat_name like 'opened cursors current' and snap_id between 97334 and 97349
+
+
+
+col status form a14
+col time form a22
+set lines 1000
+
+select * from (
+SELECT object_type, status, start_time, end_time, round(input_bytes/power(1024,3),1) as Input_GB, round(output_bytes/power(1024,3),1) as output_GB
+, case when 24*60*(end_time - start_time) > 3600*4 then to_char(round(24*(end_time - start_time),2)) || ' hour'
+when 24*60*60*(end_time - start_time) > 60*5 then to_char(round(24*60*(end_time - start_time),1)) || ' minutes' else to_char(round(24*60*60*(end_time - start_time),0)) || ' seconds' end as time
+, round((input_bytes/1024/1024.0) / case when (end_time - start_time) = 0 then 1 else 24*60*60*(end_time - start_time) end,2) as "Througput MB/s"
+FROM v$rman_status
+WHERE OBJECT_TYPE IS NOT NULL
+AND operation = 'BACKUP'
+AND start_time > sysdate - 7
+-- and object_type = 'DB INCR'
+order by start_time desc, object_type desc) where rownum 10 ;
+
+SELECT object_type, status, start_time, end_time, round(input_bytes/power(1024,3),1) as Input_GB, round(output_bytes/power(1024,3),1) as output_GB
+, case when 24*60*(end_time - start_time) > 3600*4 then to_char(round(24*(end_time - start_time),2)) || ' hour'
+when 24*60*60*(end_time - start_time) > 60*5 then to_char(round(24*60*(end_time - start_time),1)) || ' minutes' else to_char(round(24*60*60*(end_time - start_time),0)) || ' seconds' end as time
+, round((input_bytes/1024/1024.0) / case when (end_time - start_time) = 0 then 1 else 24*60*60*(end_time - start_time) end,2) as "Througput MB/s"
+FROM v$rman_status
+WHERE OBJECT_TYPE IS NOT NULL
+AND operation = 'RESTORE'
+AND start_time > sysdate - 7
+-- and object_type = 'DB INCR'
+order by start_time desc, object_type desc;
+
+
