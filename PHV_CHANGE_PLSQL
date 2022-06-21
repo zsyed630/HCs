@@ -1,0 +1,46 @@
+DECLARE
+cnt number;
+phv_cursor_execcnt number;
+phv_awr_execcnt number;
+any_plan_exists number;
+latest_phv_awr number;
+BEGIN
+    FOR v_unq_sqlids in (select distinct(sql_id) from gv$active_session_history where sample_time > sysdate - 20/(24*60) group by sql_id order by sql_id)
+    LOOP
+            select count(distinct(SQL_plan_hash_value)) into cnt from gv$active_Session_history where sample_time > sysdate - 20/(24*60) and sql_id = v_unq_sqlids.sql_id and sql_plan_hash_value <> 0 ;        
+                if cnt > 1 THEN
+--                DBMS_OUTPUT.PUT_LINE ((cnt)||' '||v_unq_sqlids.sql_id);
+                  FOR v_unq_phv in (select distinct(sql_plan_hash_value) from gv$active_Session_history where sample_time > sysdate - 20/(24*60) and sql_id = v_unq_sqlids.sql_id and sql_plan_hash_value <> 0) 
+                  LOOP
+--                DBMS_OUTPUT.PUT_LINE (v_unq_sqlids.sql_id||' '||v_unq_phv.sql_plan_hash_value);
+                  select sum(executions) into phv_cursor_execcnt from gv$sql where sql_id = v_unq_sqlids.sql_id and plan_hash_value = v_unq_phv.sql_plan_hash_value ;
+                  select sum(executions_total) into phv_awr_execcnt from dba_hist_SQLSTAT where sql_id = v_unq_sqlids.sql_id and plan_hash_value = v_unq_phv.sql_plan_hash_value  ;
+
+--
+--        THIS PART IS FOR CHECKING THE SQL_IDS WHICH JUST GOT EXECUTED WITH A NEW PHV THAT DOES NOT EXIST IN AWR AND THE SQL_ID DOES HAVE MULTIPLE PLANS. THIS SHOWS NEW POTENTIAL PLAN BECAUSE IT GOT EXECUTED an is in CURSOR CACHE
+
+                  IF (phv_cursor_execcnt > 0 and phv_cursor_execcnt is not null and phv_awr_execcnt is null ) THEN
+                    select count(distinct(plan_hash_value)) into any_plan_exists from dba_hist_SQLSTAT where sql_id = v_unq_sqlids.sql_id;
+                        IF (any_plan_exists > 0 and any_plan_exists is not null) THEN
+                        DBMS_OUTPUT.PUT_LINE ('SQL_ID : '||v_unq_sqlids.sql_id||' POTENTIALLY CHANGED PHV TO NEW PHV '||v_unq_phv.sql_plan_hash_value||', PLEASE REVIEW THE OLD/NEW PLAN ');
+--                  DBMS_OUTPUT.PUT_LINE (v_unq_sqlids.sql_id||' '||v_unq_phv.sql_plan_hash_value||' '||(phv_cursor_execcnt));
+--          NULL;
+                        END IF;
+          END IF;
+
+                  select sum(executions_total) into phv_awr_execcnt from dba_hist_SQLSTAT where sql_id = v_unq_sqlids.sql_id and plan_hash_value = v_unq_phv.sql_plan_hash_value and executions_total > 10 ;    
+
+                  IF (phv_cursor_execcnt > 0 and phv_cursor_execcnt is not null and phv_awr_execcnt is not null ) THEN
+                    select count(*) into latest_phv_awr from (select distinct(plan_hash_value) from (select plan_hash_value from (select * from (select a.instance_number inst_id, a.snap_id,a.plan_hash_value, 
+to_char(begin_interval_time,'dd-mon-yy hh24:mi') btime, abs(extract(minute from (end_interval_time-begin_interval_time)) + extract(hour from (end_interval_time-begin_interval_time))*60 + extract(day from (end_interval_time-begin_interval_time))*24*60) minutes, executions_delta executions, round(ELAPSED_TIME_delta/1000000/greatest(executions_delta,1),4) "avg duration (sec)" from dba_hist_SQLSTAT a, dba_hist_snapshot b where a.sql_id = v_unq_sqlids.sql_id and a.snap_id=b.snap_id and a.instance_number=b.instance_number order by snap_id desc , a.instance_number desc ) where rownum <= 6))) where plan_hash_value = v_unq_phv.sql_plan_hash_value;
+                        IF ( latest_phv_awr = 0 ) THEN
+                      DBMS_OUTPUT.PUT_LINE ('SQL_ID : '||v_unq_sqlids.sql_id||' POTENTIALLY CHANGED PHV TO OLD PHV '||v_unq_phv.sql_plan_hash_value||', PLEASE REVIEW BOTH OF THE OLD PLANS ');
+--            NULL;
+            END IF;
+          END IF;
+
+                  END LOOP;
+                END IF;
+    END LOOP;
+END;
+/
