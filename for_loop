@@ -1,0 +1,23 @@
+for ORACLE_SID in `ps -ef|grep pmon|grep -v 'grep\|ASM'|awk '{print $8}'|awk -F _ '{print $3}'`
+do
+    export ORACLE_SID=${ORACLE_SID}
+    DB_UNIQUE_NAME=$(${ORACLE_HOME}/bin/sqlplus -s / as sysdba <<EOF
+    set heading off feedback off pagesize 0 trimspool on
+    select value from v\$parameter where name = 'db_unique_name';
+    exit
+EOF
+)
+    sqlplus / as sysdba <<EOF
+        alter system set control_file_record_keep_time = 31 scope=both sid = '*';
+        exec dbms_workload_repository.modify_snapshot_settings(retention=>129600, interval=>30);
+EOF
+    rman target / <<EOF
+    CONFIGURE RETENTION POLICY TO RECOVERY WINDOW OF 30 DAYS;
+    CONFIGURE SNAPSHOT CONTROLFILE NAME TO '+FRA_${DB_UNIQUE_NAME}/${DB_UNIQUE_NAME}/snapcf_${DB_UNIQUE_NAME}.f';
+EOF
+    rman target / catalog rcdev/rcdev@rcdev <<EOF
+    register database;
+    CONFIGURE RETENTION POLICY TO RECOVERY WINDOW OF 30 DAYS;
+    CONFIGURE SNAPSHOT CONTROLFILE NAME TO '+FRA_${DB_UNIQUE_NAME}/${DB_UNIQUE_NAME}/snapcf_${DB_UNIQUE_NAME}.f';
+EOF
+done
