@@ -160,27 +160,27 @@ BEGIN
                     IF v_unq_object_names.object_type = 'INDEX PARTITION'
                     THEN
                         select tablespace_name into tablespace from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name; 
-                        dbms_output.put_line('alter index '||v_unq_object_names.owner||'.'||v_unq_object_names.object_name||' REBUILD PARTITION '||v_unq_object_names.subobject_name||' ONLINE TABLESPACE '||tablespace||' PARALLEL 8;');
-                        dbms_output.put_line('alter index '||v_unq_object_names.owner||'.'||v_unq_object_names.object_name||' REBUILD PARTITION '||v_unq_object_names.subobject_name||' NOPARALLEL;');
-                        dbms_output.put_line('exec dbms_stats.gather_index_stats('||chr(39)||v_unq_object_names.owner||chr(39)||','||chr(39)||v_unq_object_names.object_name||chr(39)||', partname = '||chr(39)||v_unq_object_names.subobject_name||chr(39)||', estimate_percent => 20, degree => 8);');
+                        dbms_output.put_line('alter index '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" REBUILD PARTITION '||v_unq_object_names.subobject_name||' ONLINE TABLESPACE '||tablespace||' PARALLEL 8;');
+                        dbms_output.put_line('alter index '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" REBUILD PARTITION '||v_unq_object_names.subobject_name||' NOPARALLEL;');
+                        dbms_output.put_line('exec dbms_stats.gather_index_stats('||chr(39)||v_unq_object_names.owner||chr(39)||','||chr(39)||'"'||v_unq_object_names.object_name||'"'||chr(39)||', partname = '||chr(39)||v_unq_object_names.subobject_name||chr(39)||', estimate_percent => 20, degree => 8);');
                     ELSIF v_unq_object_names.object_type = 'TABLE PARTITION'
                     THEN
                         select tablespace_name into tablespace from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name; 
-                        dbms_output.put_line('alter table '||v_unq_object_names.owner||'.'||v_unq_object_names.object_name||' MOVE PARTITION '||v_unq_object_names.subobject_name||' ONLINE TABLESPACE '||tablespace||' UPDATE INDEXES PARALLEL 8;');
-                        dbms_output.put_line('alter table '||v_unq_object_names.owner||'.'||v_unq_object_names.object_name||' MOVE PARTITION '||v_unq_object_names.subobject_name||' NOPARALLEL;');
-                        dbms_output.put_line('exec dbms_stats.gather_table_stats('||chr(39)||v_unq_object_names.owner||chr(39)||','||chr(39)||v_unq_object_names.object_name||chr(39)||', partname = '||chr(39)||v_unq_object_names.subobject_name||chr(39)||', estimate_percent => 20, cascade => TRUE, degree => 8);');
+                        dbms_output.put_line('alter table '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" MOVE PARTITION '||v_unq_object_names.subobject_name||' ONLINE TABLESPACE '||tablespace||' UPDATE INDEXES PARALLEL 8;');
+                        dbms_output.put_line('alter table '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" MOVE PARTITION '||v_unq_object_names.subobject_name||' NOPARALLEL;');
+                        dbms_output.put_line('exec dbms_stats.gather_table_stats('||chr(39)||v_unq_object_names.owner||chr(39)||','||chr(39)||'"'||v_unq_object_names.object_name||'"'||chr(39)||', partname = '||chr(39)||v_unq_object_names.subobject_name||chr(39)||', estimate_percent => 20, cascade => TRUE, degree => 8);');
                     ELSIF v_unq_object_names.object_type = 'INDEX SUBPARTITION'
                     THEN
                         select tablespace_name into tablespace from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name; 
-                        dbms_output.put_line('alter index '||v_unq_object_names.owner||'.'||v_unq_object_names.object_name||' REBUILD SUBPARTITION '||v_unq_object_names.subobject_name||' ONLINE TABLESPACE '||tablespace||' PARALLEL 8;');
-                        dbms_output.put_line('alter index '||v_unq_object_names.owner||'.'||v_unq_object_names.object_name||' REBUILD SUBPARTITION '||v_unq_object_names.subobject_name||' NOPARALLEL;');
-                        dbms_output.put_line('exec dbms_stats.gather_index_stats('||chr(39)||v_unq_object_names.owner||chr(39)||','||chr(39)||v_unq_object_names.object_name||chr(39)||', partname = '||chr(39)||v_unq_object_names.subobject_name||chr(39)||', estimate_percent => 20, degree => 8);');
+                        dbms_output.put_line('alter index '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" REBUILD SUBPARTITION '||v_unq_object_names.subobject_name||' ONLINE TABLESPACE '||tablespace||' PARALLEL 8;');
+                        dbms_output.put_line('alter index '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" REBUILD SUBPARTITION '||v_unq_object_names.subobject_name||' NOPARALLEL;');
+                        dbms_output.put_line('exec dbms_stats.gather_index_stats('||chr(39)||v_unq_object_names.owner||chr(39)||','||chr(39)||'"'||v_unq_object_names.object_name||'"'||chr(39)||', partname = '||chr(39)||v_unq_object_names.subobject_name||chr(39)||', estimate_percent => 20, degree => 8);');
                     ELSIF v_unq_object_names.object_type = 'TABLE SUBPARTITION'
                     THEN
                         select tablespace_name into tablespace from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name; 
-                        dbms_output.put_line('alter table '||v_unq_object_names.owner||'.'||v_unq_object_names.object_name||' MOVE SUBPARTITION '||v_unq_object_names.subobject_name||' ONLINE TABLESPACE '||tablespace||' UPDATE INDEXES PARALLEL 8;');
-                        dbms_output.put_line('alter table '||v_unq_object_names.owner||'.'||v_unq_object_names.object_name||' MOVE SUBPARTITION '||v_unq_object_names.subobject_name||' NOPARALLEL;');
-                        dbms_output.put_line('exec dbms_stats.gather_table_stats('||chr(39)||v_unq_object_names.owner||chr(39)||','||chr(39)||v_unq_object_names.object_name||chr(39)||', partname = '||chr(39)||v_unq_object_names.subobject_name||chr(39)||', estimate_percent => 20, cascade => TRUE, degree => 8);');
+                        dbms_output.put_line('alter table '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" MOVE SUBPARTITION '||v_unq_object_names.subobject_name||' ONLINE TABLESPACE '||tablespace||' UPDATE INDEXES PARALLEL 8;');
+                        dbms_output.put_line('alter table '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" MOVE SUBPARTITION '||v_unq_object_names.subobject_name||' NOPARALLEL;');
+                        dbms_output.put_line('exec dbms_stats.gather_table_stats('||chr(39)||v_unq_object_names.owner||chr(39)||','||chr(39)||'"'||v_unq_object_names.object_name||'"'||chr(39)||', partname = '||chr(39)||v_unq_object_names.subobject_name||chr(39)||', estimate_percent => 20, cascade => TRUE, degree => 8);');
                     END IF;
                     
                 dbms_output.put_line('-----------------------------------------------------------------');                
@@ -263,9 +263,9 @@ BEGIN
                 dbms_output.put_line('--Blocks with Free Space (75-100%)= '||v_freespace4_blocks);
                 dbms_output.put_line('--Number of Full blocks           = '||v_full_blocks);
                 select tablespace_name into tablespace from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and segment_type = v_unq_object_names.object_type ;
-                dbms_output.put_line('alter table '||v_unq_object_names.owner||'.'||v_unq_object_names.object_name||' MOVE ONLINE TABLESPACE '||tablespace||' UPDATE INDEXES PARALLEL 8;');
-                dbms_output.put_line('alter table '||v_unq_object_names.owner||'.'||v_unq_object_names.object_name||' NOPARALLEL;');
-                dbms_output.put_line('exec dbms_stats.gather_table_stats('||chr(39)||v_unq_object_names.owner||chr(39)||','||chr(39)||v_unq_object_names.object_name||chr(39)||', estimate_percent => 20, cascade => TRUE, degree => 8 );');
+                dbms_output.put_line('alter table '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" MOVE ONLINE TABLESPACE '||tablespace||' UPDATE INDEXES PARALLEL 8;');
+                dbms_output.put_line('alter table '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" NOPARALLEL;');
+                dbms_output.put_line('exec dbms_stats.gather_table_stats('||chr(39)||v_unq_object_names.owner||chr(39)||','||chr(39)||'"'||v_unq_object_names.object_name||'"'||chr(39)||', estimate_percent => 20, cascade => TRUE, degree => 8 );');
                 dbms_output.put_line('-----------------------------------------------------------------');
                 dbms_output.put_line(chr(10));
                 END IF;
@@ -350,9 +350,9 @@ BEGIN
                 dbms_output.put_line('--Blocks with Free Space (75-100%)= '||v_freespace4_blocks);
                 dbms_output.put_line('--Number of Full blocks           = '||v_full_blocks);
                 select tablespace_name into tablespace from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and segment_type = v_unq_object_names.object_type ;
-                dbms_output.put_line('alter index '||v_unq_object_names.owner||'.'||v_unq_object_names.object_name||' REBUILD ONLINE TABLESPACE '||tablespace||' PARALLEL 8;');
-                dbms_output.put_line('alter index '||v_unq_object_names.owner||'.'||v_unq_object_names.object_name||' NOPARALLEL;');
-                dbms_output.put_line('exec dbms_stats.gather_index_stats('||chr(39)||v_unq_object_names.owner||chr(39)||','||chr(39)||v_unq_object_names.object_name||chr(39)||', estimate_percent => 20, degree => 8 );');
+                dbms_output.put_line('alter index '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" REBUILD ONLINE TABLESPACE '||tablespace||' PARALLEL 8;');
+                dbms_output.put_line('alter index '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" NOPARALLEL;');
+                dbms_output.put_line('exec dbms_stats.gather_index_stats('||chr(39)||v_unq_object_names.owner||chr(39)||','||chr(39)||'"'||v_unq_object_names.object_name||'"'||chr(39)||', estimate_percent => 20, degree => 8 );');
                 dbms_output.put_line('-----------------------------------------------------------------');
                 dbms_output.put_line(chr(10));
                 END IF;
@@ -369,4 +369,3 @@ BEGIN
         END LOOP;
 END;
 /
-
