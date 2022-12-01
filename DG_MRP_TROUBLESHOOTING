@@ -3,6 +3,18 @@ alter database recover managed standby database cancel;
 
 alter database recover managed standby database using current logfile disconnect;
 
+                select al.thrd "Thread", almax "Last Seq Received", lhmax "Last Seq Applied"
+                from (select thread# thrd, max(sequence#) almax
+                from v$archived_log
+              where resetlogs_change#=(select resetlogs_change# from v$database)
+              group by thread#) al,
+                (select thread# thrd, max(sequence#) lhmax
+             from v$log_history
+              where resetlogs_change#=(select resetlogs_change# from v$database)
+             group by thread#) lh
+            where al.thrd = lh.thrd;
+
+
 /oracle/stagenfs/scripts/shell/connect_all_dr.ksh PHYSICAL_STANDBY /oracle/stagenfs/scripts/sql/start_managed_recovery_cl.sql
 
 
