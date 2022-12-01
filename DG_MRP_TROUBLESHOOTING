@@ -1,0 +1,292 @@
+alter database recover managed standby database cancel;
+
+
+alter database recover managed standby database using current logfile disconnect;
+
+/oracle/stagenfs/scripts/shell/connect_all_dr.ksh PHYSICAL_STANDBY /oracle/stagenfs/scripts/sql/start_managed_recovery_cl.sql
+
+
+-- Size, usage, Reclaimable space used 
+SELECT 
+  ROUND((A.SPACE_LIMIT / 1024 / 1024 / 1024), 2) AS FLASH_IN_GB, 
+  ROUND((A.SPACE_USED / 1024 / 1024 / 1024), 2) AS FLASH_USED_IN_GB, 
+  ROUND((A.SPACE_RECLAIMABLE / 1024 / 1024 / 1024), 2) AS FLASH_RECLAIMABLE_GB,
+  SUM(B.PERCENT_SPACE_USED)  AS PERCENT_OF_SPACE_USED
+FROM 
+  V$RECOVERY_FILE_DEST A,
+  V$FLASH_RECOVERY_AREA_USAGE B
+GROUP BY
+  SPACE_LIMIT, 
+  SPACE_USED , 
+  SPACE_RECLAIMABLE ;
+
+
+149689-149788
+
+rman target / catalog rman/rman@PRM
+run
+{
+restore archivelog from logseq=8755 thread=2;
+}
+restore archivelog from logseq=1253 thread=2;
+}
+
+
+
+SELECT sid, serial#, sofar, totalwork, opname, round(sofar/totalwork*100,2) AS pct_complete
+FROM v$session_longops
+WHERE opname LIKE 'RMAN%'
+AND opname NOT LIKE '%aggregate%' AND totalwork != 0
+AND sofar <> totalwork;
+
+select 'alter system kill session '||chr(39)||sid||','||serial#||',@'||inst_id||chr(39)||' immediate;' from gv$session where schemaname = 'XZXS014'
+
+
+
+to turn on flashback Make sure MRP 
+
+
+ select dest_id,DEST_NAME,STATUS,ERROR,db_unique_name from V$ARCHIVE_DEST_STATUS where DEST
+
+ select dest_id,DEST_NAME,STATUS,ERROR,db_unique_name  from V$ARCHIVE_DEST_STATUS where DEST_ID = 11;
+
+
+ 
+Copyright (c) 2018, Oracle. All rights reserved. Oracle Confidential.
+
+
+Click to add to Favorites		PING[ARC2]: Heartbeat Failed To Connect To Standby ORA-16047 (Doc ID 2379045.1)	To BottomTo Bottom	
+
+In this Document
+Symptoms
+Cause
+Solution
+References
+
+APPLIES TO:
+Oracle Database - Enterprise Edition - Version 11.2.0.4 and later
+Information in this document applies to any platform.
+SYMPTOMS
+Log shipping failing with ORA-16047
+
+Alert.log:
+
+PING[ARC2]: Heartbeat failed to connect to standby 'stdby'. Error is 16047.
+Wed Mar 21 09:26:37 2018
+ARC3: Archivelog destination LOG_ARCHIVE_DEST_2 disabled: Data Guard configuration identifier mismatch
+Archived Log entry 25736 added for thread 1 sequence 1662 ID 0x5bb1dab4 dest 1:
+Environment Detail:
+
+Primary:
+
+
+SELECT database_role role, name, db_unique_name, platform_id, open_mode, log_mode, flashback_on, protection_mode, protection_level FROM v$database;
+
+ROLE      NAME     DB_UNIQUE_NAME      OPEN_MODE         LOG_MODE     
+PRIMARY   prim     prim                READ WRITE         ARCHIVELOG 
+
+ORACLE_SID set stdby
+
+log_archive_dest_2     SERVICE=stdby ASYNC AFFIRM VALID_FOR=(ONLINE_LOGFILES,PRIMARY_ROLE) DB_UNIQUE_NAME=stdby
+*   fal_client     prim
+*   fal_server     stdby
+*   log_archive_config     DG_CONFIG=(prim,stdby)
+
+Standby:
+
+SQL> SELECT database_role role, name, db_unique_name, platform_id, open_mode, log_mode, flashback_on, protection_mode, protection_level FROM v$database;
+
+ROLE                          NAME     DB_UNIQUE_NAME         OPEN_MODE     LOG_MODE     
+PHYSICAL STANDBY     prim      stdby                             MOUNTED     ARCHIVELOG     
+
+ORACLE_SID set prim
+
+log_archive_dest_2     SERVICE=prim ASYNC AFFIRM VALID_FOR=(ONLINE_LOGFILES,PRIMARY_ROLE) DB_UNIQUE_NAME=prim
+*   fal_client     stdby
+*   fal_server     prim
+*   log_archive_config     DG_CONFIG=(prim,stdby)
+
+Parameters are set correctly.
+
+CAUSE
+TNS alias (stdby) configured  in log_archive_Dest_2 parameter at primary is pointing to primary itself.
+
+From primary:
+
+
+sqlplus sys/pwd@stdby as sysdba
+select name,db_unique_name,database_role from v$database;
+
+NAME DB_UNIQUE_NAME DATABASE_ROLE
+prim  prim PRIMARY
+tnsnames.ora
+stdby=
+  (DESCRIPTION =
+    (ADDRESS_LIST =
+      (ADDRESS = (PROTOCOL = TCP)(HOST = <primary_host_ip>)(PORT = 1521))<<<<Primary HOST IP
+    )
+    (CONNECT_DATA =
+      (SERVER = DEDICATED)
+      (SERVICE_NAME = stdby)<<<<<<<<<<Primary ORACLE_SID
+    )
+  )
+
+ 
+
+SOLUTION
+Make correction to tns alias defined for standby.
+
+stdby =
+  (DESCRIPTION =
+    (ADDRESS_LIST =
+      (ADDRESS = (PROTOCOL = TCP)(HOST = <standby_host_ip>)(PORT = 1521))<<<<Change HOST IP to Standby host IP.
+    )
+    (CONNECT_DATA =
+      (SERVER = DEDICATED)
+      (SERVICE_NAME = prim)<<<<<<<<<<Change it to standby ORACLE_SID which is prim
+    )
+  )
+
+
+log_archive_dest_2
+string                                       SERVICE=PMR_NI LGWR ASYNC NOAF
+                                             FIRM VALID_FOR=ONLINE_LOGFILES
+                                             ,PRIMARY_ROLE)  COMPRESSION=EN
+                                             ABLE DB_UNIQUE_NAME=PMR_NI
+
+
+log_archive_dest_2                   string      SERVICE=DRDP LGWR ASYNC VALID_
+                                                 FOR=(ONLINE_LOGFILES, PRIMARY_
+                                                 ROLE) DB_UNIQUE_NAME=DRDP
+
+alter system set log_archive_dest_2 = 'SERVICE=PIISX_LF_PR04B LGWR ASYNC NOAFFIRM VALID_FOR=ONLINE_LOGFILES,PRIMARY_ROLE)  COMPRESSION=ENABLE DB_UNIQUE_NAME=PIISX_N_LF' scope=both sid = '*';
+
+alter system set log_archive_dest_3 = 'SERVICE=PIISX_T5 LGWR ASYNC NOAFFIRM VALID_FOR=ONLINE_LOGFILES,PRIMARY_ROLE)  COMPRESSION=ENABLE DB_UNIQUE_NAME=PIISX_T5' scope=both sid = '*';
+
+ alter system set log_archive_dest_20="SERVICE=(address=(protocol=TCP)(host=pr04db26-dr.db.grainger.com)(port=1522)))(connect_data=(SID=PIISI))) LGWR SYNC AFFIRM DB_UNIQUE_NAME=PIISI_N_LF" scope=both;
+
+Defer and enable log_archive_dest_state_2 at primary:
+
+ alter system set log_archive_dest_state_2=defer scope=both;
+
+ alter system switch logfile;
+
+alter system set log_archive_dest_state_2=enable scope=both;
+
+ select dest_id,DEST_NAME,STATUS,ERROR,db_unique_name  from V$ARCHIVE_DEST_STATUS where DEST_ID = 2;
+#ecommerce_mexico
+#gcom_international
+
+alter system set log_archive_dest_state_6=defer scope=both;
+
+ alter system switch logfile;
+
+alter system set log_archive_dest_state_6=enable scope=both;
+
+ select dest_id,DEST_NAME,STATUS,ERROR,db_unique_name  from V$ARCHIVE_DEST_STATUS where DEST_ID = 6;
+
+[oracle@pr02db19:POV_1 /u01/app/oracle/product/12.1.0.2]$  ps -ef|egrep "ora_arc.*_POV"|grep -v grep |while read user pid junk; do echo "kill -9 $pid"; done
+
+
+PEDP =
+  (DESCRIPTION =
+    (ADDRESS_LIST =
+      (ADDRESS = (PROTOCOL = TCP)(HOST = prledadb100.ppci.grainger.com)(PORT = 1522))
+    )
+    (CONNECT_DATA =
+      (SERVER = DEDICATED)
+      (SID = PEDP)
+    )
+  )
+
+rman target / catalog rman/rman@PRM
+run
+{
+restore archivelog from logseq=8755 thread=2;
+}
+restore archivelog from logseq=1253 thread=2;
+}
+
+rman target / catalog rman/rman@PRM_LF
+run
+{
+restore archivelog from logseq=19919 thread=1;
+restore archivelog from logseq=19300 thread=2;
+}
+
+
+ALTER SYSTEM SET log_archive_dest_20='service="(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCOL=tcp)(HOST=pr04db26-dr.db.grainger.com)(PORT=1522)))(CONNECT_DATA=(SERVICE_NAME=PIISI)(SERVER=dedicated)))"',' lgwr async db_unique_name="PIISI_N_LF" valid_for=(online_logfile,primary_role)' SCOPE=BOTH SID='PIISI1';
+
+ALTER SYSTEM SET log_archive_dest_20='service="(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCOL=tcp)(HOST=pr04db26-dr.db.grainger.com)(PORT=1522)))(CONNECT_DATA=(SERVICE_NAME=PIISI)(SERVER=dedicated)))"',' lgwr async db_unique_name="PIISI_N_LF" valid_for=(online_logfile,primary_role)' SCOPE=BOTH SID='PIISI2';
+
+ALTER SYSTEM SET log_archive_dest_2='service="(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCOL=tcp)(HOST=pr04db09-dr.db.grainger.com)(PORT=1522)))(CONNECT_DATA=(SERVICE_NAME=PIISX)(SERVER=dedicated)))"',' lgwr async db_unique_name="PIISX_N_LF" valid_for=(online_logfile,primary_role)' SCOPE=BOTH SID='PIISX1';
+
+ALTER SYSTEM SET log_archive_dest_2='service="(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCOL=tcp)(HOST=pr04db09-dr.db.grainger.com)(PORT=1522)))(CONNECT_DATA=(SERVICE_NAME=PIISX)(SERVER=dedicated)))"',' lgwr async db_unique_name="PIISX_N_LF" valid_for=(online_logfile,primary_role)' SCOPE=BOTH SID='PIISX2';
+
+
+
+
+
+ALTER SYSTEM SET log_archive_dest_3='service="(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCOL=tcp)(HOST=pr03db09-dr.db.grainger.com)(PORT=1522)))(CONNECT_DATA=(SERVICE_NAME=PIISI)(SERVER=dedicated)))"',' lgwr async db_unique_name="PIISI_T5" valid_for=(online_logfile,primary_role)' SCOPE=BOTH SID='PIISI1';
+
+ALTER SYSTEM SET log_archive_dest_3='service="(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCOL=tcp)(HOST=pr03db09-dr.db.grainger.com)(PORT=1522)))(CONNECT_DATA=(SERVICE_NAME=PIISI)(SERVER=dedicated)))"',' lgwr async db_unique_name="PIISI_T5" valid_for=(online_logfile,primary_role)' SCOPE=BOTH SID='PIISI2';
+
+ALTER SYSTEM SET log_archive_dest_3='service="(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCOL=tcp)(HOST=pr03db09-dr.db.grainger.com)(PORT=1522)))(CONNECT_DATA=(SERVICE_NAME=PIISX)(SERVER=dedicated)))"',' lgwr async db_unique_name="PIISX_T5" valid_for=(online_logfile,primary_role)' SCOPE=BOTH SID='PIISX1';
+
+ALTER SYSTEM SET log_archive_dest_3='service="(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCOL=tcp)(HOST=pr03db09-dr.db.grainger.com)(PORT=1522)))(CONNECT_DATA=(SERVICE_NAME=PIISX)(SERVER=dedicated)))"',' lgwr async db_unique_name="PIISX_T5" valid_for=(online_logfile,primary_role)' SCOPE=BOTH SID='PIISX2';
+
+
+
+SQL> show parameter log_archive_dest_20
+
+NAME                                 TYPE        VALUE
+------------------------------------ ----------- ------------------------------
+log_archive_dest_20                  string      SERVICE=PIISI_LF_PR04D LGWR AS
+                                                 YNC NOAFFIRM VALID_FOR=(ONLINE
+                                                 _LOGFILES,PRIMARY_ROLE) COMPRE
+                                                 SSION=ENABLE DB_UNIQUE_NAME=PI
+                                                 ISI_N_LF
+
+
+rman target / catalog rman/rman@PRM_LF 
+
+    Thread Last Seq Received Last Seq Applied
+---------- ----------------- ----------------
+         1             20322            19920
+         2             19669            19301
+
+list backup summary from logseq=19919 thread=1;
+
+
+
+rman target / catalog rman/rman@PRM_LF
+run
+{
+run {
+allocate channel c1 device type disk FORMAT '/oracle/stagenfs/backup/PAGI_BACKUP/%d_%s_%p_%c_%t.arc.rman';
+allocate channel c2 device type disk FORMAT '/oracle/stagenfs/backup/PAGI_BACKUP/%d_%s_%p_%c_%t.arc.rman';
+allocate channel c3 device type disk FORMAT '/oracle/stagenfs/backup/PAGI_BACKUP/%d_%s_%p_%c_%t.arc.rman';
+backup archivelog from logseq=19919 thread=1;
+backup archivelog from logseq=19300 thread=2;
+release channel c1;
+release channel c2;
+release channel c3;
+}
+
+
+    Thread Last Seq Received Last Seq Applied
+---------- ----------------- ----------------
+         1            901737           901727
+         2            308304           308298
+         3             22782            22782
+
+
+
+DGCOM_LF        /u01/app/oracle/product/19.0.0.0/dbhome_3       19.0.0.0.0
+Q2GCOM_LF       /u01/app/oracle/product/19.0.0.0/dbhome_3       19.0.0.0.0
+QCAGCOM_LF      /u01/app/oracle/product/12.1.0.2/dbhome 12.1.0.2.0
+QGCOM_LF        /u01/app/oracle/product/19.0.0.0/dbhome_3       19.0.0.0.0
+QP2GCOM_LF      /u01/app/oracle/product/19.0.0.0/dbhome_3       19.0.0.0.0
+QP3GCOM_LF      /u01/app/oracle/product/12.1.0.2/dbhome 12.1.0.2.0
+QPGCOM_LF       /u01/app/oracle/product/19.0.0.0/dbhome_3       19.0.0.0.0
+
