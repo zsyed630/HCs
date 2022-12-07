@@ -1,0 +1,33 @@
+ if [ "$CLUSTER" == "qa04" ]
+  then
+    cut_db=`echo $db| sed 's/^te//;s/_LF$//'`
+    lower_case_db=`echo "${db}" | awk '{print tolower($0)}'`
+    instance_names=`$ORACLE_HOME/bin/srvctl config database -d $db -v|grep "Database instances: "|cut -d ":" -f2|tr "," "\n"`
+    ERRORS=/oracle/stagenfs/scripts/db_hchk/slack/log/errors.txt
+    rm -f $ERRORS
+    instance_error_log=/oracle/stagenfs/scripts/db_hchk/slack/log
+    for instance_name in $instance_names
+    do
+    db_hostnames=`$ORACLE_HOME/bin/srvctl status instance -d $db -i $instance_name|cut -d " " -f7`
+      for db_hostname in $db_hostnames
+      do
+      ssh $db_hostname <<EOF > /dev/null 2>&1
+      export ORACLE_HOME=$ORACLE_HOME ;
+      $ORACLE_HOME/bin/adrci exec="set base /oracle/$cut_db/saptrace; set homepath diag/rdbms/$lower_case_db/${instance_name}; show alert -p \\\"message_text like \'\%ORA-\%\' and originating_timestamp \> systimestamp-1/24\\\"" -term | grep -v "ADR Home =" >> $instance_error_log/${instance_name}.log
+EOF
+      ANY_ERRORS=`cat $instance_error_log/${instance_name}.log |grep "ORA-"|wc -l`
+      if [ $ANY_ERRORS == 0 ]
+      then
+        sed -i '1 s/^/Db Instance : '$instance_name' HAS 0 ERRORS/' $instance_error_log/${instance_name}.log
+        cat $instance_error_log/${instance_name}.log >> $ERRORS
+
+        rm $instance_error_log/${instance_name}.log
+      else
+        sed -i '1 s/^/Db Instance : '$instance_name' HAS '$ANY_ERRORS' ERRORS/' $instance_error_log/${instance_name}.log
+        cat $instance_error_log/${instance_name}.log >> $ERRORS
+
+        rm $instance_error_log/${instance_name}.log
+      fi
+      done
+    done
+  sed -i '/^[*;]\+$/d' $ERRORS
