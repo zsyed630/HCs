@@ -5,6 +5,11 @@ from   v$sesstat a, v$statname b, v$session s
 where  a.statistic# = b.statistic# and s.sid=a.sid
 and    b.name = 'opened cursors current';
 
+select sql_plan_hash_value,sample_time,count(*) from dba_hist_active_sess_history
+where sql_id='bvwnqfp2gjf8s'
+and sample_time between to_date('11/15/2022:00:00:00','MM/DD/YYYY:HH24:MI:SS') and to_date('11/22/2022:10:00:00','MM/DD/YYYY:HH24:MI:SS')
+group by sql_plan_hash_value,sample_time order by 2;
+
 select round(AAS) from ( select ( select count(*) from v$active_session_history where sample_time > sysdate - interval '5' minute AND user_id <> 0 and session_type = 'FOREGROUND' and session_state in ('WAITING','CPU'))/(2*60) as AAS from dual);
 
 
