@@ -5,6 +5,9 @@ from   v$sesstat a, v$statname b, v$session s
 where  a.statistic# = b.statistic# and s.sid=a.sid
 and    b.name = 'opened cursors current';
 
+select round(AAS) from ( select ( select count(*) from v$active_session_history where sample_time > sysdate - interval '5' minute AND user_id <> 0 and session_type = 'FOREGROUND' and session_state in ('WAITING','CPU'))/(2*60) as AAS from dual);
+
+
 set lines  100
 set pages  999
  
