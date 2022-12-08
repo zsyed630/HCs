@@ -1,3 +1,48 @@
+set serverout on size 1000000
+declare
+v_freespace1_bytes number;
+v_freespace2_bytes number;
+v_freespace3_bytes number;
+v_freespace4_bytes number;
+v_freespace1_blocks number;
+v_freespace2_blocks number;
+v_freespace3_blocks number;
+v_freespace4_blocks number;
+v_full_bytes number;
+v_full_blocks number;
+v_unformatted_bytes number;
+v_unformatted_blocks number;
+BEGIN
+dbms_space.space_usage(
+segment_owner   => '&SCHEMA_NAME',
+segment_name    => '&OBJECT_NAME',
+segment_type    => '&OBJECT_TYPE',
+fs1_bytes               => v_freespace1_bytes,
+fs1_blocks              => v_freespace1_blocks,
+fs2_bytes               => v_freespace2_bytes,
+fs2_blocks              => v_freespace2_blocks,
+fs3_bytes               => V_freespace3_bytes,
+fs3_blocks              => v_freespace3_blocks,
+fs4_bytes               => v_freespace4_bytes,
+fs4_blocks              => v_freespace4_blocks,
+full_bytes              => v_full_bytes,
+full_blocks     => v_full_blocks,
+unformatted_blocks => v_unformatted_blocks,
+unformatted_bytes => v_unformatted_bytes);
+dbms_output.put_line('');
+dbms_output.put_line('###############################################');
+dbms_output.put_line('Report: Free space below the High-Water Mark');
+dbms_output.put_line('###############################################');
+dbms_output.put_line('Blocks with Free Space (0-25%)  = '||v_freespace1_blocks);
+dbms_output.put_line('Blocks with Free Space (25-50%) = '||v_freespace2_blocks);
+dbms_output.put_line('Blocks with Free Space (50-75%) = '||v_freespace3_blocks);
+dbms_output.put_line('Blocks with Free Space (75-100%)= '||v_freespace4_blocks);
+dbms_output.put_line('Number of Full blocks           = '||v_full_blocks);
+dbms_output.put_line('###############################################');
+dbms_output.put_line('RECOMMENDATION: Enable row movement for the table and ALTER TABLE .... SHRINK SPACE to free up unused space.');
+end;
+/
+
 set serveroutput on
 declare
 v_unformatted_blocks number;
