@@ -1,0 +1,230 @@
+GREEN="\033[1;32;40m"
+RED="\033[1;31;40m"
+NORM="\033[0m"
+ENDCOLOR="\e[0m"
+HOST_NAME=`hostname`
+GRID_HOME=`cat /etc/oratab|grep '+ASM'|awk -F ':' '{print $2}'`
+SYS_PWD=`cat /oracle_software/scripts/db_hchk/.sys_pwd`
+DB=$1
+
+
+ASM_IS_RUNNING=`${GRID_HOME}/bin/srvctl status asm`
+
+if grep -q "ASM is running on" <<< "${ASM_IS_RUNNING}"
+then
+    echo -e "${GREEN}ASM : ASM IS UP AND RUNNING${ENDCOLOR}"
+else
+    echo -e "${RED}ASM : ASM IS NOT RUNNING${ENDCOLOR}"
+fi
+
+
+LISTENER_IS_RUNNING=`${GRID_HOME}/bin/srvctl status listener -v|awk 'NR==2'`
+
+if grep -q "Listener LISTENER is running on" <<< "${LISTENER_IS_RUNNING}"
+then
+    echo -e "${GREEN}LISTENER : LISTENER IS UP AND RUNNING${ENDCOLOR}"
+else
+    echo -e "${RED}LISTENER : LISTENER IS NOT RUNNING${ENDCOLOR}"
+fi
+
+if [[ -n $DB ]]
+then
+    CHECK_SPECIFIC=`${GRID_HOME}/bin/srvctl config database -d $DB|grep 'Database unique name'|awk '{print $4}'`
+else
+    CHECK_SPECIFIC=`${GRID_HOME}/bin/srvctl config database`
+fi
+
+for db in `echo $CHECK_SPECIFIC`
+do
+    echo ""
+#    echo "======================================================================================"
+    ORACLE_HOME=`${GRID_HOME}/bin/srvctl config database -d ${db} |grep 'home'|awk '{print $3}'`
+    ORACLE_SID=`${GRID_HOME}/bin/srvctl config database -d ${db} |grep 'instance'|awk '{print $3}'`
+    SERVICES=`${GRID_HOME}/bin/srvctl config database -d ${db} |grep 'Services'|awk '{print $2}'`
+    DB_IS_RUNNING=`${ORACLE_HOME}/bin/srvctl status database -d ${db} -v`
+    if grep -q "Instance status: Open" <<< "${DB_IS_RUNNING}"
+    then
+        echo -e "${GREEN}DB : ${db} IS UP AND RUNNING WITH INSTANCE ${ORACLE_SID} ${ENDCOLOR}"
+        for SERVICE in $(echo $SERVICES | sed "s/,/ /g")
+        do
+            IS_SERVICE_RUNNING=`${ORACLE_HOME}/bin/srvctl status service -d ${db} -s ${SERVICE} -v`
+            if grep -q "is not running" <<< "${IS_SERVICE_RUNNING}"
+            then
+                echo -e "===>${RED} DB_SERVICE : ${SERVICE} IS NOT RUNNING${ENDCOLOR}"
+            else
+                echo -e "===>${GREEN} DB_SERVICE : ${SERVICE} IS UP AND RUNNING${ENDCOLOR}"
+            fi
+        done
+
+        ANY_ORA_ERRORS=$($ORACLE_HOME/bin/sqlplus -s / as sysdba <<EOF
+        set heading off feedback off pagesize 0 trimspool on
+        select count(*) from v\$diag_alert_ext where originating_timestamp > systimestamp-1/24 and message_text not like 'Result = ORA-0' and message_text like 'ORA-%' order by ORIGINATING_TIMESTAMP desc;
+        exit
+EOF
+)
+        if [[ ${ANY_ORA_ERRORS} -ne 0 ]]
+        then
+            echo -e "===>${RED} ORA_ERRORS_PAST_HOUR : ${ANY_ORA_ERRORS} ERRORS${ENDCOLOR}"
+        else
+            echo -e "===>${GREEN} ORA_ERRORS_PAST_HOUR : ${ANY_ORA_ERRORS} ERRORS${ENDCOLOR}"
+        fi
+
+
+
+        AAS_PAST_FIFTEEN_MINS=$($ORACLE_HOME/bin/sqlplus -s / as sysdba <<EOF
+        set heading off feedback off pagesize 0 trimspool on
+        select round(AAS) from ( select ( select count(*) from v\$active_session_history where sample_time > sysdate - interval '15' minute AND user_id <> 0 and session_type = 'FOREGROUND' and session_state in ('WAITING','CPU'))/(2*60) as AAS from dual);
+        exit
+EOF
+)
+
+        CPU_COUNT=$($ORACLE_HOME/bin/sqlplus -s / as sysdba <<EOF
+        set heading off feedback off pagesize 0 trimspool on
+        select value from v\$parameter where name = 'cpu_count';
+        exit
+EOF
+)
+        if [[ $AAS_PAST_FIFTEEN_MINS -gt $CPU_COUNT ]]
+        then
+            echo -e "===>${RED} DB_PERFORMANCE_WAIT_PAST_15_MINS : YES, METRIC_AVG_ACTIVE_SESSIONS AT ${AAS_PAST_FIFTEEN_MINS} ${ENDCOLOR}"
+        else
+            echo -e "===>${GREEN} DB_PERFORMANCE_WAIT_PAST_15_MINS : NO ${ENDCOLOR}"
+        fi
+
+        FIFTEEN_MINS_AGO_LINUX_FORMAT=`date -d "15 minutes ago" +"%F %T"`
+        CURRENT_MIN_LINUX_FORMAT=`date +"%F %T"`
+
+        TOP_WAIT_EVENTS=$($ORACLE_HOME/bin/sqlplus -s / as sysdba <<EOF
+        set lines 100 heading off feedback off pagesize 0 trimspool off
+        select 'TOP_WAIT_EVENT_PAST_15_MINS : '||event||' WAIT_COUNT : '||cnt||',' from (select event_id, event, count(*) cnt from gv\$active_session_history where sample_time BETWEEN TIMESTAMP '${FIFTEEN_MINS_AGO_LINUX_FORMAT}' AND TIMESTAMP '${CURRENT_MIN_LINUX_FORMAT}' and wait_class_id in (select wait_class_id from (select wait_class_id, wait_class, count(*) cnt from gv\$active_session_history where sample_time BETWEEN TIMESTAMP '${FIFTEEN_MINS_AGO_LINUX_FORMAT}' AND TIMESTAMP '${CURRENT_MIN_LINUX_FORMAT}' and wait_class_id is not null group by wait_class_id, wait_class order by 3 desc) where rownum <=3 ) group by event_id, event order by 3 desc) where rownum <=3;
+        exit
+EOF
+)
+        FIRST_EVENT=`echo $TOP_WAIT_EVENTS |awk -F',' '{print $1}'`
+        SECOND_EVENT=`echo $TOP_WAIT_EVENTS |awk -F',' '{print $2}'`
+        THIRD_EVENT=`echo $TOP_WAIT_EVENTS |awk -F',' '{print $3}'`
+
+        if [[ -n "${FIRST_EVENT}" ]]
+        then
+            echo -e "===> ${GREEN}${FIRST_EVENT}${ENDCOLOR}"
+        fi
+
+        if [[ -n "${SECOND_EVENT}" ]]
+        then
+            echo -e "===>${GREEN}${SECOND_EVENT}${ENDCOLOR}"
+        fi
+
+        if [[ -n "${THIRD_EVENT}" ]]
+        then
+            echo -e "===>${GREEN}${THIRD_EVENT}${ENDCOLOR}"
+        fi
+
+
+        TOP_SQL_IDS_BY_WAIT_EVENTS=$($ORACLE_HOME/bin/sqlplus -s / as sysdba <<EOF
+        set lines 200 heading off feedback off pagesize 0 trimspool off
+        select 'TOP_SQL_ID_BY_WAIT : '||SQL_ID||' WITH WAIT_EVENT : '||EVENT||' AND WAIT_COUNT : '||cnt||',' from (select sql_id,event,count(*) cnt from gv\$active_session_history where sample_time BETWEEN TIMESTAMP '${FIFTEEN_MINS_AGO_LINUX_FORMAT}' AND TIMESTAMP '${CURRENT_MIN_LINUX_FORMAT}' and  event_id in (select event_id from (select event_id, event, count(*) cnt from gv\$active_session_history where sample_time BETWEEN TIMESTAMP '${FIFTEEN_MINS_AGO_LINUX_FORMAT}' AND TIMESTAMP '${CURRENT_MIN_LINUX_FORMAT}' and wait_class_id in (select wait_class_id from (select wait_class_id, wait_class, count(*) cnt from gv\$active_session_history where sample_time BETWEEN TIMESTAMP '${FIFTEEN_MINS_AGO_LINUX_FORMAT}' AND TIMESTAMP '${CURRENT_MIN_LINUX_FORMAT}' and wait_class_id is not null group by wait_class_id, wait_class order by 3 desc) where rownum <=5 ) group by event_id, event order by 3 desc) where rownum <=5) and sql_id is not null group by sql_id,event  order by 3 desc) where rownum <=3;
+        exit
+EOF
+)
+
+        FIRST_SQL_ID=`echo $TOP_SQL_IDS_BY_WAIT_EVENTS |awk -F',' '{print $1}'`
+        SECOND_SQL_ID=`echo $TOP_SQL_IDS_BY_WAIT_EVENTS |awk -F',' '{print $2}'`
+        THIRD_SQL_ID=`echo $TOP_SQL_IDS_BY_WAIT_EVENTS |awk -F',' '{print $3}'`
+
+        if [[ -n "${FIRST_SQL_ID}" ]]
+        then
+            echo -e "===> ${GREEN}${FIRST_SQL_ID}${ENDCOLOR}"
+        fi
+
+        if [[ -n "${SECOND_SQL_ID}" ]]
+        then
+            echo -e "===>${GREEN}${SECOND_SQL_ID}${ENDCOLOR}"
+        fi
+
+        if [[ -n "${THIRD_SQL_ID}" ]]
+        then
+            echo -e "===>${GREEN}${THIRD_SQL_ID}${ENDCOLOR}"
+        fi
+
+        PRIMARY_DB_UNIQUE_NAME=$($ORACLE_HOME/bin/sqlplus -s / as sysdba <<EOF
+        set lines 100 heading off feedback off pagesize 0 trimspool off
+        select value from v\$parameter where name = 'db_unique_name';
+        exit
+EOF
+)
+
+        LOG_ARCHIVE_CONF_NAMES=$($ORACLE_HOME/bin/sqlplus -s / as sysdba <<EOF
+        set lines 100 heading off feedback off pagesize 0 trimspool off
+        select value from v\$parameter where name = 'log_archive_config';
+        exit
+EOF
+)
+
+        if grep -q "DG_CONFIG=" <<< "${LOG_ARCHIVE_CONF_NAMES}"
+        then
+            EDITED_DG_CONFIG=`echo "${LOG_ARCHIVE_CONF_NAMES//DG_CONFIG=(}"`
+            NEWLY_EDITED_DG_CONFIG=`echo "${EDITED_DG_CONFIG//)}"`
+        else
+            EDITED_DG_CONFIG=`echo "${LOG_ARCHIVE_CONF_NAMES//dg_config=(}"`
+            NEWLY_EDITED_DG_CONFIG=`echo "${EDITED_DG_CONFIG//)}"`
+        fi
+
+        PRIMARY_DB_CURRENT_TIME=`date +"%m/%d/%Y %T" -d "30 seconds ago"`
+
+        IFS=","
+        for STANDBY_DB_UNIQUE_NAME in $NEWLY_EDITED_DG_CONFIG
+        do
+            if [[ "${STANDBY_DB_UNIQUE_NAME}" == "${PRIMARY_DB_UNIQUE_NAME}" ]]
+            then
+                continue
+                echo "SAME"
+            else
+                echo "exit" | sqlplus -s sys/${SYS_PWD}@${STANDBY_DB_UNIQUE_NAME} as sysdba
+                if [[ $? -ne 0 ]]
+                then
+                    echo -e "===>${RED} STANDBY_DB : ${STANDBY_DB_UNIQUE_NAME} CANT CONNECT ${ENDCOLOR}"
+                    continue
+                else
+
+                    IS_APPLYING_LOG=$($ORACLE_HOME/bin/sqlplus -s sys/${SYS_PWD}@${STANDBY_DB_UNIQUE_NAME} as sysdba <<EOF
+                    set lines 100 heading off feedback off pagesize 0 trimspool off
+                    select status from v\$managed_standby where process like 'MRP%';
+                    exit
+EOF
+)
+
+                    if [[ "${IS_APPLYING_LOG}" != "APPLYING_LOG" ]]
+                    then
+                        echo -e "===>${RED} STANDBY_DB : ${STANDBY_DB_UNIQUE_NAME} MRP IS NOT RUNNING ${ENDCOLOR}"
+                        continue
+                    fi
+
+                    STANDBY_DATUM_TIME=$($ORACLE_HOME/bin/sqlplus -s sys/${SYS_PWD}@${STANDBY_DB_UNIQUE_NAME} as sysdba <<EOF
+                    set lines 100 heading off feedback off pagesize 0 trimspool off
+                    select datum_time from v\$dataguard_stats where name = 'apply lag';
+                    exit
+EOF
+)
+                    if grep -q "ORA-" <<< "${STANDBY_DATUM_TIME}"
+                    then
+                        echo -e "===>${RED} STANDBY_DB : ${STANDBY_DB_UNIQUE_NAME} CANT CONNECT ${ENDCOLOR}"
+                        continue
+                    fi
+
+                    if [[ $STANDBY_DATUM_TIME > $PRIMARY_DB_CURRENT_TIME ]] && [[ "${IS_APPLYING_LOG}" == "APPLYING_LOG" ]]
+                    then
+                        echo -e "===>${GREEN} STANDBY_DB : ${STANDBY_DB_UNIQUE_NAME} IS IN SYNC WITH PRIMARY ${STANDBY_DATUM_TIME} ${ENDCOLOR}"
+                    else
+                        echo -e "===>${RED} STANDBY_DB : ${STANDBY_DB_UNIQUE_NAME} IS BEHIND PRIMARY ${STANDBY_DATUM_TIME} ${ENDCOLOR}"
+                    fi
+                fi
+            fi
+        done
+        unset IFS
+    else
+        echo -e "===>${RED}DB : ${db} IS NOT RUNNING${ENDCOLOR}"
+    fi
+done
+
+
+
