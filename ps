@@ -1,0 +1,6 @@
+    IS_OPEN_MV_RUNNING=`dcli -s '-o "StrictHostKeyChecking=no"' -g /oracle/stagenfs/scripts/shell/all_dr_hosts -l oracle "ps -ef|grep 'open_mv.sh'|grep -v grep|wc -l"|awk '{print $2}'|grep -v '0'|wc -l`
+        while [ $IS_OPEN_MV_RUNNING -gt 0 ]
+        do
+            sleep 30
+            IS_OPEN_MV_RUNNING=`dcli -s '-o "StrictHostKeyChecking=no"' -g /oracle/stagenfs/scripts/shell/all_dr_hosts -l oracle "ps -ef|grep 'open_mv.sh'|grep -v grep|wc -l"|awk '{print $2}'|grep -v '0'|wc -l`
+        done
