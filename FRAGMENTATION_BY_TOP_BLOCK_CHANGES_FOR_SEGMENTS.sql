@@ -1,4 +1,4 @@
-set lines 400
+set lines 4000
 set pages 200
 set feedback off
 set echo off
@@ -11,7 +11,7 @@ set verify off
 
 
 column STARTTIME new_value STARTTIME
-select to_char(systimestamp-7, 'YYYY-MM-DD HH24:MI:SS')"STARTTIME" from dual;
+select to_char(systimestamp-'&TIME_PERIOD', 'YYYY-MM-DD HH24:MI:SS')"STARTTIME" from dual;
 column ENDTIME new_value ENDTIME
 select to_char(systimestamp, 'YYYY-MM-DD HH24:MI:SS')"ENDTIME" from dual;
 
@@ -49,22 +49,22 @@ INDX_TYPE varchar2(50);
 tablespace varchar2(100);
 does_object_exists number;
 BEGIN
-    
-    select min(snap_id) into V_MIN_SNAP_ID from dba_hist_active_sess_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME'; 
-    select max(snap_id) into V_MAX_SNAP_ID from dba_hist_active_sess_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME'; 
+
+    select min(snap_id) into V_MIN_SNAP_ID from dba_hist_active_sess_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME';
+    select max(snap_id) into V_MAX_SNAP_ID from dba_hist_active_sess_history where sample_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME';
     select '&STARTTIME' into DEFINED_STARTTIME from dual;
     select '&ENDTIME' into DEFINED_ENDTIME from dual;
 
     dbms_output.put_line(chr(10));
     dbms_output.put_line('TOP OBJECTS BY MOST AMOUNT OF DML IN DATABASE FOR TIME PERIOD '||DEFINED_STARTTIME||' to '||DEFINED_ENDTIME);
-    dbms_output.put_line('------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');
+    dbms_output.put_line('------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');
 
     FOR v_unq_object_names in (select * from (select owner,object_name,subobject_name,object_type,sum(db_block_changes_delta) "db_block_changes_delta" from (SELECT distinct ss.snap_id,sego.owner,sego.object_name,sego.subobject_name,sego.object_type,seg.db_block_changes_delta FROM  dba_hist_seg_stat seg   JOIN  dba_hist_snapshot ss ON  seg.snap_id = ss.snap_id JOIN dba_hist_seg_stat_obj sego ON seg.DATAOBJ# = sego.DATAOBJ#  WHERE  ss.begin_interval_time BETWEEN TIMESTAMP '&STARTTIME' AND TIMESTAMP '&ENDTIME' and sego.owner not in ('SYS','** MISSING **','DBSNMP') and object_name != 'ZZSD_MT_OPEN_QTY~0' and sego.object_type != 'LOB' group by ss.snap_id,sego.owner,sego.object_name,sego.subobject_name,sego.object_type,seg.db_block_changes_delta ORDER BY seg.db_block_changes_delta DESC) group by owner,object_name,subobject_name,object_type order by 5 desc) where rownum <= 200  )
     LOOP
 --        select subobject_name into v_unq_object_names.subobject_name from dba_objects where data_object_id = v_unq_object_names.data_object_id;
 
             IF v_unq_object_names.subobject_name is null
-            THEN             
+            THEN
                 select count(*) into does_object_exists from dba_objects where owner = v_unq_object_names.owner and object_name = v_unq_object_names.object_name;
             ELSE
                 select count(*) into does_object_exists from dba_objects where owner = v_unq_object_names.owner and object_name = v_unq_object_names.object_name and subobject_name = v_unq_object_names.subobject_name;
@@ -83,26 +83,26 @@ BEGIN
                 select round(bytes/1024/1024) into OBJECT_SIZE_MB from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name and segment_type = v_unq_object_names.object_type;
                 select round(bytes/1024) into OBJECT_SIZE_KB from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name and segment_type = v_unq_object_names.object_type;
                 select round(bytes) into OBJECT_SIZE_BYTES from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name and segment_type = v_unq_object_names.object_type;
-            
+
                 IF v_unq_object_names.object_type = 'INDEX PARTITION'
                 THEN
                     select PCT_FREE into V_PCT_FREE from dba_ind_partitions where index_owner = v_unq_object_names.owner and index_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name ;
                     select INI_TRANS into V_INI_TRANS from dba_ind_partitions where index_owner = v_unq_object_names.owner and index_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name;
-                    select LAST_ANALYZED into V_LAST_ANALYZED from dba_ind_partitions where index_owner = v_unq_object_names.owner and index_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name;
+                    select LAST_ANALYZED into V_LAST_ANALYZED from dba_ind_partitions where index_owner = v_unq_object_names.owner and index_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name; 
                 ELSIF v_unq_object_names.object_type = 'INDEX SUBPARTITION'
                 THEN
-                    select PCT_FREE into V_PCT_FREE from dba_ind_subpartitions where index_owner = v_unq_object_names.owner and index_name = v_unq_object_names.object_name and subpartition_name = v_unq_object_names.subobject_name ;
-                    select INI_TRANS into V_INI_TRANS from dba_ind_subpartitions where index_owner = v_unq_object_names.owner and index_name = v_unq_object_names.object_name and subpartition_name = v_unq_object_names.subobject_name;
+                    select PCT_FREE into V_PCT_FREE from dba_ind_subpartitions where index_owner = v_unq_object_names.owner and index_name = v_unq_object_names.object_name and subpartition_name = v_unq_object_names.subobject_name ;    
+                    select INI_TRANS into V_INI_TRANS from dba_ind_subpartitions where index_owner = v_unq_object_names.owner and index_name = v_unq_object_names.object_name and subpartition_name = v_unq_object_names.subobject_name;   
                     select LAST_ANALYZED into V_LAST_ANALYZED from dba_ind_subpartitions where index_owner = v_unq_object_names.owner and index_name = v_unq_object_names.object_name and subpartition_name = v_unq_object_names.subobject_name;
                 ELSIF v_unq_object_names.object_type = 'TABLE PARTITION'
                 THEN
                     select PCT_FREE into V_PCT_FREE from dba_tab_partitions where table_owner = v_unq_object_names.owner and table_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name;
                     select INI_TRANS into V_INI_TRANS from dba_tab_partitions where table_owner = v_unq_object_names.owner and table_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name;
-                    select LAST_ANALYZED into V_LAST_ANALYZED from dba_tab_partitions where table_owner = v_unq_object_names.owner and table_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name;
+                    select LAST_ANALYZED into V_LAST_ANALYZED from dba_tab_partitions where table_owner = v_unq_object_names.owner and table_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name; 
                 ELSIF v_unq_object_names.object_type = 'TABLE SUBPARTITION'
                 THEN
-                    select PCT_FREE into V_PCT_FREE from dba_tab_subpartitions where table_owner = v_unq_object_names.owner and table_name = v_unq_object_names.object_name and subpartition_name = v_unq_object_names.subobject_name;
-                    select INI_TRANS into V_INI_TRANS from dba_tab_subpartitions where table_owner = v_unq_object_names.owner and table_name = v_unq_object_names.object_name and subpartition_name = v_unq_object_names.subobject_name;
+                    select PCT_FREE into V_PCT_FREE from dba_tab_subpartitions where table_owner = v_unq_object_names.owner and table_name = v_unq_object_names.object_name and subpartition_name = v_unq_object_names.subobject_name;     
+                    select INI_TRANS into V_INI_TRANS from dba_tab_subpartitions where table_owner = v_unq_object_names.owner and table_name = v_unq_object_names.object_name and subpartition_name = v_unq_object_names.subobject_name;   
                     select LAST_ANALYZED into V_LAST_ANALYZED from dba_tab_subpartitions where table_owner = v_unq_object_names.owner and table_name = v_unq_object_names.object_name and subpartition_name = v_unq_object_names.subobject_name;
                 END IF;
 
@@ -143,7 +143,7 @@ BEGIN
                 select round(bytes) into OBJECT_SIZE_BYTES from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name and segment_type = v_unq_object_names.object_type;
                 select round(bytes/1024/1024/1024) into OBJECT_SIZE_GB from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name and segment_type = v_unq_object_names.object_type;
                 select round(bytes/1024/1024) into OBJECT_SIZE_MB from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name and segment_type = v_unq_object_names.object_type;
-                select round(bytes/1024) into OBJECT_SIZE_KB from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name and segment_type = v_unq_object_names.object_type; 
+                select round(bytes/1024) into OBJECT_SIZE_KB from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name and segment_type = v_unq_object_names.object_type;
                 select round(bytes) into OBJECT_SIZE_BYTES from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name and segment_type = v_unq_object_names.object_type;
                 select round(((v_freespace1_bytes+v_freespace2_bytes+v_freespace3_bytes+v_freespace4_bytes)/OBJECT_SIZE_BYTES)*100) into fragmented_percentage from dual;
 
@@ -153,7 +153,7 @@ BEGIN
                 THEN
                 dbms_output.put_line('');
                 dbms_output.put_line('');
-                dbms_output.put_line('---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');
+                dbms_output.put_line('---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');     
                 dbms_output.put_line('--OWNER: '||v_unq_object_names.owner);
                 dbms_output.put_line('--OBJECT_NAME : '||v_unq_object_names.object_name);
                 dbms_output.put_line('--OBJECT_TYPE : '||v_unq_object_names.object_type);
@@ -172,36 +172,36 @@ BEGIN
                 dbms_output.put_line('--Number of Full blocks           = '||v_full_blocks);
                     IF v_unq_object_names.object_type = 'INDEX PARTITION'
                     THEN
-                        select tablespace_name into tablespace from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name; 
-                        dbms_output.put_line('alter index '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" REBUILD PARTITION '||v_unq_object_names.subobject_name||' ONLINE TABLESPACE '||tablespace||' PARALLEL 8;');
-                        dbms_output.put_line('alter index '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" REBUILD PARTITION '||v_unq_object_names.subobject_name||' NOPARALLEL;');
+                        select tablespace_name into tablespace from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name;
+                        dbms_output.put_line('alter index '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" REBUILD PARTITION '||v_unq_object_names.subobject_name||' ONLINE TABLESPACE '||tablespace||' PARALLEL 8;');                        dbms_output.put_line('alter index '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" REBUILD PARTITION '||v_unq_object_names.subobject_name||' NOPARALLEL;');
                         dbms_output.put_line('exec dbms_stats.gather_index_stats('||chr(39)||v_unq_object_names.owner||chr(39)||','||chr(39)||'"'||v_unq_object_names.object_name||'"'||chr(39)||', partname = '||chr(39)||v_unq_object_names.subobject_name||chr(39)||', estimate_percent => 20, degree => 8);');
                     ELSIF v_unq_object_names.object_type = 'TABLE PARTITION'
                     THEN
-                        select tablespace_name into tablespace from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name; 
+                        select tablespace_name into tablespace from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name;
                         dbms_output.put_line('alter table '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" MOVE PARTITION '||v_unq_object_names.subobject_name||' ONLINE TABLESPACE '||tablespace||' UPDATE INDEXES PARALLEL 8;');
                         dbms_output.put_line('alter table '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" MOVE PARTITION '||v_unq_object_names.subobject_name||' NOPARALLEL;');
                         dbms_output.put_line('exec dbms_stats.gather_table_stats('||chr(39)||v_unq_object_names.owner||chr(39)||','||chr(39)||'"'||v_unq_object_names.object_name||'"'||chr(39)||', partname = '||chr(39)||v_unq_object_names.subobject_name||chr(39)||', estimate_percent => 20, cascade => TRUE, degree => 8);');
                     ELSIF v_unq_object_names.object_type = 'INDEX SUBPARTITION'
                     THEN
-                        select tablespace_name into tablespace from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name; 
+                        select tablespace_name into tablespace from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name;
                         dbms_output.put_line('alter index '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" REBUILD SUBPARTITION '||v_unq_object_names.subobject_name||' ONLINE TABLESPACE '||tablespace||' PARALLEL 8;');
                         dbms_output.put_line('alter index '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" REBUILD SUBPARTITION '||v_unq_object_names.subobject_name||' NOPARALLEL;');
                         dbms_output.put_line('exec dbms_stats.gather_index_stats('||chr(39)||v_unq_object_names.owner||chr(39)||','||chr(39)||'"'||v_unq_object_names.object_name||'"'||chr(39)||', partname = '||chr(39)||v_unq_object_names.subobject_name||chr(39)||', estimate_percent => 20, degree => 8);');
                     ELSIF v_unq_object_names.object_type = 'TABLE SUBPARTITION'
                     THEN
-                        select tablespace_name into tablespace from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name; 
+                        select tablespace_name into tablespace from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and partition_name = v_unq_object_names.subobject_name;
                         dbms_output.put_line('alter table '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" MOVE SUBPARTITION '||v_unq_object_names.subobject_name||' ONLINE TABLESPACE '||tablespace||' UPDATE INDEXES PARALLEL 8;');
                         dbms_output.put_line('alter table '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" MOVE SUBPARTITION '||v_unq_object_names.subobject_name||' NOPARALLEL;');
                         dbms_output.put_line('exec dbms_stats.gather_table_stats('||chr(39)||v_unq_object_names.owner||chr(39)||','||chr(39)||'"'||v_unq_object_names.object_name||'"'||chr(39)||', partname = '||chr(39)||v_unq_object_names.subobject_name||chr(39)||', estimate_percent => 20, cascade => TRUE, degree => 8);');
                     END IF;
-                    
-                dbms_output.put_line('---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');                
+
+                dbms_output.put_line('---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');     
+
                 dbms_output.put_line(chr(10));
                 END IF;
-                EXCEPTION 
+                EXCEPTION
                 WHEN OTHERS THEN
-                IF SQLCODE = -10614 or SQLCODE = -06512 or SQLCODE = -01403 THEN
+                IF SQLCODE = -10614 or SQLCODE = -06512 THEN
                 --NULL; -- suppresses ORA-01539 exception
                 CONTINUE;
                 ELSE
@@ -209,7 +209,7 @@ BEGIN
                 END IF;
                 END;
 
-            ELSIF v_unq_object_names.object_type = 'TABLE' 
+            ELSIF v_unq_object_names.object_type = 'TABLE'
             THEN
                 select PCT_FREE into V_PCT_FREE from dba_tables where owner = v_unq_object_names.owner and table_name = v_unq_object_names.object_name;
                 select INI_TRANS into V_INI_TRANS from dba_tables where owner = v_unq_object_names.owner and table_name = v_unq_object_names.object_name;
@@ -248,7 +248,7 @@ BEGIN
                 unformatted_bytes => v_unformatted_bytes);
                 select round(bytes) into OBJECT_SIZE_BYTES from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and segment_type = v_unq_object_names.object_type ;
                 select round(((v_freespace1_bytes+v_freespace2_bytes+v_freespace3_bytes+v_freespace4_bytes)/OBJECT_SIZE_BYTES)*100) into fragmented_percentage from dual;
-                select round(bytes/1024/1024/1024) into OBJECT_SIZE_GB from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and segment_type = v_unq_object_names.object_type;
+                select round(bytes/1024/1024/1024) into OBJECT_SIZE_GB from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and segment_type = v_unq_object_names.object_type;       
                 select round(bytes/1024/1024) into OBJECT_SIZE_MB from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and segment_type = v_unq_object_names.object_type;
                 select round(bytes/1024) into OBJECT_SIZE_KB from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and segment_type = v_unq_object_names.object_type;
                 select round(bytes) into OBJECT_SIZE_BYTES from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and segment_type = v_unq_object_names.object_type;
@@ -257,10 +257,10 @@ BEGIN
 
                 IF fragmented_percentage > 20 and OBJECT_SIZE_GB < 200
                 THEN
-              
+
                 dbms_output.put_line('');
                 dbms_output.put_line('');
-                dbms_output.put_line('---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');
+                dbms_output.put_line('---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');     
                 dbms_output.put_line('--OWNER: '||v_unq_object_names.owner);
                 dbms_output.put_line('--OBJECT_NAME : '||v_unq_object_names.object_name);
                 dbms_output.put_line('--OBJECT_TYPE : '||v_unq_object_names.object_type);
@@ -279,12 +279,12 @@ BEGIN
                 dbms_output.put_line('alter table '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" MOVE ONLINE TABLESPACE '||tablespace||' UPDATE INDEXES PARALLEL 8;');
                 dbms_output.put_line('alter table '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" NOPARALLEL;');
                 dbms_output.put_line('exec dbms_stats.gather_table_stats('||chr(39)||v_unq_object_names.owner||chr(39)||','||chr(39)||'"'||v_unq_object_names.object_name||'"'||chr(39)||', estimate_percent => 20, cascade => TRUE, degree => 8 );');
-                dbms_output.put_line('---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');
+                dbms_output.put_line('---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');     
                 dbms_output.put_line(chr(10));
                 END IF;
-                EXCEPTION 
+                EXCEPTION
                 WHEN OTHERS THEN
-                IF SQLCODE = -10614 or SQLCODE = -06512 or SQLCODE = -01403 THEN
+                IF SQLCODE = -10614 or SQLCODE = -06512 THEN
                 --NULL; -- suppresses ORA-01539 exception
                 CONTINUE;
                 ELSE
@@ -336,18 +336,18 @@ BEGIN
                 unformatted_bytes => v_unformatted_bytes);
                 select round(bytes) into OBJECT_SIZE_BYTES from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and segment_type = v_unq_object_names.object_type ;
                 select round(((v_freespace1_bytes+v_freespace2_bytes+v_freespace3_bytes+v_freespace4_bytes)/OBJECT_SIZE_BYTES)*100) into fragmented_percentage from dual;
-                select round(bytes/1024/1024/1024) into OBJECT_SIZE_GB from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and segment_type = v_unq_object_names.object_type;
+                select round(bytes/1024/1024/1024) into OBJECT_SIZE_GB from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and segment_type = v_unq_object_names.object_type;       
                 select round(bytes/1024/1024) into OBJECT_SIZE_MB from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and segment_type = v_unq_object_names.object_type;
                 select round(bytes/1024) into OBJECT_SIZE_KB from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and segment_type = v_unq_object_names.object_type;
                 select round(bytes) into OBJECT_SIZE_BYTES from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and segment_type = v_unq_object_names.object_type;
-                
-                
+
+
                 IF fragmented_percentage > 20 and OBJECT_SIZE_GB < 200
                 THEN
-              
+
                 dbms_output.put_line('');
                 dbms_output.put_line('');
-                dbms_output.put_line('---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');
+                dbms_output.put_line('---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');     
                 dbms_output.put_line('--OWNER: '||v_unq_object_names.owner);
                 dbms_output.put_line('--OBJECT_NAME : '||v_unq_object_names.object_name);
                 dbms_output.put_line('--OBJECT_TYPE : '||v_unq_object_names.object_type);
@@ -365,13 +365,13 @@ BEGIN
                 select tablespace_name into tablespace from dba_segments where owner = v_unq_object_names.owner and segment_name = v_unq_object_names.object_name and segment_type = v_unq_object_names.object_type ;
                 dbms_output.put_line('alter index '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" REBUILD ONLINE TABLESPACE '||tablespace||' PARALLEL 8;');
                 dbms_output.put_line('alter index '||v_unq_object_names.owner||'."'||v_unq_object_names.object_name||'" NOPARALLEL;');
-                dbms_output.put_line('exec dbms_stats.gather_index_stats('||chr(39)||v_unq_object_names.owner||chr(39)||','||chr(39)||'"'||v_unq_object_names.object_name||'"'||chr(39)||', estimate_percent => 20, degree => 8 );');
-                dbms_output.put_line('---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');
+                dbms_output.put_line('exec dbms_stats.gather_index_stats('||chr(39)||v_unq_object_names.owner||chr(39)||','||chr(39)||'"'||v_unq_object_names.object_name||'"'||chr(39)||', estimate_percent => 20, degree => 8 );');      
+                dbms_output.put_line('---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------');     
                 dbms_output.put_line(chr(10));
                 END IF;
-                EXCEPTION 
+                EXCEPTION
                 WHEN OTHERS THEN
-                IF SQLCODE = -10614 or SQLCODE = -06512 or SQLCODE = -01403 THEN
+                IF SQLCODE = -10614 or SQLCODE = -06512 THEN
                 --NULL; -- suppresses ORA-01539 exception
                 CONTINUE;
                 ELSE
