@@ -4,13 +4,13 @@ NORM="\033[0m"
 ENDCOLOR="\e[0m"
 HOST_NAME=`hostname`
 GRID_HOME=`cat /etc/oratab|grep '+ASM'|awk -F ':' '{print $2}'`
-SYS_PWD=`cat /home/oracle/dba/scripts/.key_sys`
+SYS_PWD=`cat /oracle/stagenfs/scripts/shell/.key_dbe_mon`
 TBSP_PERCENT_USED=45
 ASM_PERCENT_USED=45
 DB=$1
 
-
-
+echo "################################################################################################################################################################################################################"
+export ORACLE_HOME=$GRID_HOME
 ASM_IS_RUNNING=`${GRID_HOME}/bin/srvctl status asm`
 
 if grep -q "ASM is not running" <<< "${ASM_IS_RUNNING}"
@@ -19,6 +19,7 @@ then
 else
     echo -e "${GREEN}ASM : ASM IS UP AND RUNNING${ENDCOLOR}"
     ORACLE_SID=`ps -ef|grep pmon|grep '+ASM'|awk '{print $8}'|awk -F "_" '{print $3}'`
+    export ORACLE_SID=$ORACLE_SID
     ORACLE_HOME=$GRID_HOME
     ASM_DSKGRP_USAGE=$($ORACLE_HOME/bin/sqlplus -s / as sysdba <<EOF
     set lines 200 heading off feedback off pagesize 0 trimspool off
@@ -33,10 +34,11 @@ EOF
     fi
 
 fi
+echo ""
 
 unset ORACLE_HOME
 unset ORACLE_SID
-
+echo "################################################################################################################################################################################################################"
 LISTENER_IS_RUNNING=`${GRID_HOME}/bin/srvctl status listener -v|awk 'NR==2'`
 
 if grep -q "Listener LISTENER is not running" <<< "${LISTENER_IS_RUNNING}"
@@ -45,6 +47,8 @@ then
 else
     echo -e "${GREEN}LISTENER : LISTENER IS UP AND RUNNING${ENDCOLOR}"
 fi
+
+echo ""
 
 if [[ -n $DB ]]
 then
@@ -55,8 +59,7 @@ fi
 
 for db in `echo $CHECK_SPECIFIC`
 do
-    echo ""
-#    echo "======================================================================================"
+    echo "################################################################################################################################################################################################################"
     ORACLE_HOME=`${GRID_HOME}/bin/srvctl config database -d ${db} |grep 'Oracle home'|awk '{print $3}'`
     export ORACLE_HOME=$ORACLE_HOME
     INSTANCES=`${ORACLE_HOME}/bin/srvctl config database -d ${db} |grep 'instances'|awk '{print $3}'`
@@ -134,7 +137,7 @@ do
                             then
                                 continue
                             else
-                                echo -e "   ===>${RED} ${db} SERVICE : $SERVICE IS RUNNING BUT PREFERRED INSTANCE ${SERVICE_PREF_INSTANCE} DOESNT HAVE ${SERVICE} RUNNING ${ENDCOLOR}"
+                                echo -e "===>${RED} ${db} SERVICE : $SERVICE IS RUNNING BUT PREFERRED INSTANCE ${SERVICE_PREF_INSTANCE} DOESNT HAVE ${SERVICE} RUNNING ${ENDCOLOR}"
                             fi
                         done
                     fi
@@ -168,7 +171,7 @@ do
     then
         SQLPLUS_STRING=`echo "sqlplus -s / as sysdba"`
     else
-        SQLPLUS_STRING=`echo "sqlplus -s SYS/${SYS_PWD}@${SCAN_NAME}:${SCAN_PORT}/${DB_UNIQ_SERVICE} as sysdba"`
+        SQLPLUS_STRING=`echo "sqlplus -s DBE_MON/${SYS_PWD}@${SCAN_NAME}:${SCAN_PORT}/${DB_UNIQ_SERVICE} as sysdg"`
     fi
 
 
@@ -385,6 +388,6 @@ EOF
             fi
         done
     fi
+    echo ""
         unset IFS    
 done
-
