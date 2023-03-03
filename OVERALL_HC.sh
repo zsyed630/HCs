@@ -140,7 +140,34 @@ do
     fi
 
 
+    TABLESPACE_OUTPUT=$($ORACLE_HOME/bin/${SQLPLUS_STRING} <<EOF
+    set heading off feedback off pagesize 0 trimspool on lines 200
+    set serverout on
+    DECLARE 
+    NUM_OF_DATAFILES number;
+    NUM_OF_NON_AUTOEXTEND_DF number;
+    CURRENT_TBSP_SIZE number;
+    MAX_EXTENSION_SIZE_GB number;
+    BEGIN
+        for v_uniq_tablespace_sizes in (select tablespace_name,"UPERCENT" from (select a.tablespace_name,SUM(a.bytes)/1024/1024 "CurMb",SUM(decode(b.maxextend, null, A.BYTES/1024/1024, b.maxextend*8192/1024/1024)) "MaxMb",(SUM(a.bytes)/1024/1024 - round(c."Free"/1024/1024)) "TotalUsed",(SUM(decode(b.maxextend, null, A.BYTES/1024/1024, b.maxextend*8192/1024/1024)) - (SUM(a.bytes)/1024/1024 - round(c."Free"/1024/1024))) "TotalFree",round(100*(SUM(a.bytes)/1024/1024 - round(c."Free"/1024/1024))/(SUM(decode(b.maxextend, null, A.BYTES/1024/1024, b.maxextend*8192/1024/1024)))) "UPERCENT" from dba_data_files a,sys.filext$ b,(SELECT d.tablespace_name , sum(nvl(c.bytes,0)) "Free" FROM dba_tablespaces d,DBA_FREE_SPACE c where d.tablespace_name = c.tablespace_name(+) group by d.tablespace_name) c where a.file_id = b.file#(+) and a.tablespace_name = c.tablespace_name GROUP by a.tablespace_name, c."Free"/1024 order by round(100*(SUM(a.bytes)/1024/1024 - round(c."Free"/1024/1024))/(SUM(decode(b.maxextend, null, A.BYTES/1024/1024, b.maxextend*8192/1024/1024)))) desc))
+        LOOP
+            IF v_uniq_tablespace_sizes.UPERCENT > 49 THEN
+                dbms_output.put_line('TABLESPACE : '||v_uniq_tablespace_sizes.tablespace_name||' NEEDS DATAFILE ADDED AS 90% USED WITH NO MORE EXTENSION LEFT');
+            END IF;
+        END LOOP;
+    END;
+    /
+EOF
+)
 
+
+
+    if [[ -z $TABLESPACE_OUTPUT ]]
+    then
+        echo -e "===>${GREEN} TABLESPACE_SIZE_CHECKS : PASS, NO TBSPs OVER 90% ${ENDCOLOR}"
+    else
+        echo -e "${RED}$TABLESPACE_OUTPUT${ENDCOLOR}"|sed 's/ //'
+    fi
 
 
 
