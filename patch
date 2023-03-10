@@ -1,0 +1,226 @@
+#!/bin/bash
+
+SCR_DIR=
+SHELL_DIR=
+LOG_DIR=
+HOSTNAME=`hostname -s`
+mkdir -p $LOG_DIR/$HOSTNAME
+DATETIME=`date +%Y%m%d`
+
+VERSION=$1
+
+if [[ $VERSION = '' ]]
+then
+  echo "Usage: patch_oraclehome.sh <VERSION>"
+  exit 1
+fi
+
+# Set env
+GRID_HOME=`grep +ASM /etc/oratab | cut -d: -f2`
+CLUSTER_NAME=`$GRID_HOME/bin/cemutlo -n`
+
+case $CLUSTER_NAME in
+  'cluster-pr04'|'cluster-qa01'|'cluster-qa02'|'cluster-qa04'|'cluster-pr01'|'cluster-pr02') PATCH_TYPE='';;
+  'cluster-pr04b'|'cluster-qa04b'|'cluster-pr03b'|'cluster-pr01b'|'dr-cluster'|'pr-cluster'|'qa-cluster') PATCH_TYPE='';;
+esac
+
+# Set path for new oracle home
+NEW_ORACLE_HOME=`grep ${PATCH_TYPE}_${VERSION}_NEW_ORACLE_HOME_PATH $SCR_DIR/patch.info | cut -d= -f2`
+NEW_ORACLE_HOME_NAME=`grep ${PATCH_TYPE}_${VERSION}_NEW_ORACLE_HOME_NAME $SCR_DIR/patch.info | cut -d= -f2`
+
+# Check if NEW_ORACLE_HOME_NAME is already registered in oraInventory
+echo "Checking if $NEW_ORACLE_HOME_NAME exists..." | awk '{printf "%-100s",$0}'
+ORAINV_DIR=`grep inventory_loc /etc/oraInst.loc | cut -d= -f2`
+if [[ `grep $NEW_ORACLE_HOME_NAME $ORAINV_DIR/ContentsXML/inventory.xml | wc -l` -gt 0 ]]
+then
+  echo "OK"
+else
+  echo "FAILED"
+  exit 1
+fi
+
+# Set patch path
+SXD_PATCH=`grep ${PATCH_TYPE}_${VERSION}_SXD_PATCH $SCR_DIR/patch.info | cut -d= -f2`
+OCW_PATCH=`grep ${PATCH_TYPE}_${VERSION}_OCW_PATCH $SCR_DIR/patch.info | cut -d= -f2`
+PROACTIVE_BP_PATCH=`grep ${PATCH_TYPE}_${VERSION}_PROACTIVE_BP_PATCH $SCR_DIR/patch.info | cut -d= -f2`
+PATCH_FOLDER=`zipinfo -1 $SXD_PATCH | head -1 | sed 's/\/$//'`
+PATCH_NAME=`grep ${PATCH_TYPE}_${VERSION}_PATCH_NAME $SCR_DIR/patch.info | cut -d= -f2`
+PROACTIVE_BP_PATCH_NUMBER=`echo $PROACTIVE_BP_PATCH | awk -F/ '{print $NF}'`
+OCW_PATCH_NUMBER=`echo $OCW_PATCH | awk -F/ '{print $NF}'`
+OPATCH_FILE=`grep ${PATCH_TYPE}_${VERSION}_OPATCH $SCR_DIR/patch.info | cut -d= -f2`
+LIST_OF_ONEOFF=`grep ${PATCH_TYPE}_${VERSION}_ONEOFF $SCR_DIR/patch.info | cut -d= -f2`
+OJVM_PATCH=`grep ${PATCH_TYPE}_${VERSION}_OJVM_PATCH $SCR_DIR/patch.info | cut -d= -f2`
+
+# Update OPatch
+if [[ $PATCH_TYPE = '' ]]
+then
+  echo "Backing up and installing latest OPatch and MOPatch..."
+  unzip -o -qd $NEW_ORACLE_HOME/sapbundle $SXD_PATCH "$PATCH_FOLDER/OPatch/*" >> $LOG_DIR/$HOSTNAME/opatch_mopatch_install_$DATETIME.log 2>$LOG_DIR/$HOSTNAME/opatch_mopatch_install_$DATETIME.err
+  unzip -o -qd $NEW_ORACLE_HOME/sapbundle $SXD_PATCH "$PATCH_FOLDER/MOPatch/*" >> $LOG_DIR/$HOSTNAME/opatch_mopatch_install_$DATETIME.log 2>$LOG_DIR/$HOSTNAME/opatch_mopatch_install_$DATETIME.err
+  test -d $NEW_ORACLE_HOME/OPatch && mv $NEW_ORACLE_HOME/OPatch $NEW_ORACLE_HOME/OPatch_$DATETIME >> $LOG_DIR/$HOSTNAME/opatch_mopatch_install_$DATETIME.log 2>$LOG_DIR/$HOSTNAME/opatch_mopatch_install_$DATETIME.err
+  test -d $NEW_ORACLE_HOME/MOPatch && mv $NEW_ORACLE_HOME/MOPatch $NEW_ORACLE_HOME/MOPatch_$DATETIME >> $LOG_DIR/$HOSTNAME/opatch_mopatch_install_$DATETIME.log 2>$LOG_DIR/$HOSTNAME/opatch_mopatch_install_$DATETIME.err
+  mv $NEW_ORACLE_HOME/sapbundle/$PATCH_FOLDER/OPatch $NEW_ORACLE_HOME/OPatch >> $LOG_DIR/$HOSTNAME/opatch_mopatch_install_$DATETIME.log 2>$LOG_DIR/$HOSTNAME/opatch_mopatch_install_$DATETIME.err
+  mv $NEW_ORACLE_HOME/sapbundle/$PATCH_FOLDER/MOPatch $NEW_ORACLE_HOME/MOPatch >> $LOG_DIR/$HOSTNAME/opatch_mopatch_install_$DATETIME.log 2>$LOG_DIR/$HOSTNAME/opatch_mopatch_install_$DATETIME.err
+else
+  echo "Backing up and installing latest OPatch in $NEW_ORACLE_HOME..."
+  test -d $NEW_ORACLE_HOME/OPatch && mv $NEW_ORACLE_HOME/OPatch $NEW_ORACLE_HOME/OPatch_$DATETIME >> $LOG_DIR/$HOSTNAME/opatch_install_$DATETIME.log 2>$LOG_DIR/$HOSTNAME/opatch_install_$DATETIME.err
+  unzip -o -qd $NEW_ORACLE_HOME/ $OPATCH_FILE
+fi
+
+# Apply OCW Patch
+echo "Running OCW prepatch script..." | awk '{printf "%-100s",$0}'
+chmod 755 $OCW_PATCH/custom/scripts/prepatch.sh
+$OCW_PATCH/custom/scripts/prepatch.sh -dbhome $NEW_ORACLE_HOME >> $LOG_DIR/$HOSTNAME/ocw_patch_$DATETIME.log
+if [[ $? -eq 0 ]]
+then
+  echo "DONE"
+else
+  echo "FAILED"
+fi
+
+echo "Applying Database Proactive Bundled Patch..." | awk '{printf "%-100s",$0}'
+if [[ $VERSION = '11g' ]]
+then
+  env ORACLE_HOME=$NEW_ORACLE_HOME $NEW_ORACLE_HOME/OPatch/opatch napply -silent -force_conflict -local $PROACTIVE_BP_PATCH -oh $NEW_ORACLE_HOME -ocmrf $SCR_DIR/ocm_11g.rsp >> $LOG_DIR/$HOSTNAME/proactive_bp_$DATETIME.log 2>$LOG_DIR/$HOSTNAME/proactive_bp_$DATETIME.err
+else
+  env ORACLE_HOME=$NEW_ORACLE_HOME $NEW_ORACLE_HOME/OPatch/opatch napply -silent -force_conflict -local $PROACTIVE_BP_PATCH -oh $NEW_ORACLE_HOME >> $LOG_DIR/$HOSTNAME/proactive_bp_$DATETIME.log 2>$LOG_DIR/$HOSTNAME/proactive_bp_$DATETIME.err
+fi
+if [[ $? -eq 0 ]]
+then
+  echo "DONE"
+else
+  echo "FAILED"
+fi
+
+# Apply OJVM Patch
+if [[ $OJVM_PATCH != '' ]]
+then
+  echo "Applying OJVM Patch..." | awk '{printf "%-100s",$0}'
+  if [[ $VERSION = '11g' ]]
+  then
+    env ORACLE_HOME=$NEW_ORACLE_HOME $NEW_ORACLE_HOME/OPatch/opatch napply -silent -force_conflict -local $OJVM_PATCH -oh $NEW_ORACLE_HOME -ocmrf $SCR_DIR/ocm_11g.rsp >> $LOG_DIR/$HOSTNAME/ojvm_patch_$DATETIME.log 2>$LOG_DIR/$HOSTNAME/ojvm_patch_$DATETIME.err
+  else
+    env ORACLE_HOME=$NEW_ORACLE_HOME $NEW_ORACLE_HOME/OPatch/opatch napply -silent -force_conflict -local $OJVM_PATCH -oh $NEW_ORACLE_HOME >> $LOG_DIR/$HOSTNAME/ojvm_patch_$DATETIME.log 2>$LOG_DIR/$HOSTNAME/ojvm_patch_$DATETIME.err
+  fi
+  if [[ $? -eq 0 ]]
+  then
+    echo "DONE"
+  else
+    echo "FAILED"
+  fi
+fi
+
+echo "Appying OCW Patch..." | awk '{printf "%-100s",$0}'
+if [[ $VERSION = '11g' ]]
+then
+  env ORACLE_HOME=$NEW_ORACLE_HOME $NEW_ORACLE_HOME/OPatch/opatch napply -silent -force_conflict -local $OCW_PATCH/custom/server/$OCW_PATCH_NUMBER -oh $NEW_ORACLE_HOME -ocmrf $SCR_DIR/ocm_11g.rsp >> $LOG_DIR/$HOSTNAME/ocw_patch_$DATETIME.log 2>$LOG_DIR/$HOSTNAME/ocw_patch_$DATETIME.err
+else
+  env ORACLE_HOME=$NEW_ORACLE_HOME $NEW_ORACLE_HOME/OPatch/opatch napply -silent -force_conflict -local $OCW_PATCH -oh $NEW_ORACLE_HOME >> $LOG_DIR/$HOSTNAME/ocw_patch_$DATETIME.log 2>$LOG_DIR/$HOSTNAME/ocw_patch_$DATETIME.err
+fi
+if [[ $? -eq 0 ]]
+then
+  echo "DONE"
+else
+  echo "FAILED"
+fi
+
+if [[ $PATCH_TYPE = 'SAP' ]]
+then
+  echo "Applying SAP Bundle Patch..." | awk '{printf "%-100s",$0}'
+  env ORACLE_HOME=$NEW_ORACLE_HOME $NEW_ORACLE_HOME/MOPatch/mopatch.sh -v -s $SXD_PATCH >> $LOG_DIR/$HOSTNAME/sxd_patch_$DATETIME.log 2>$LOG_DIR/$HOSTNAME/sxd_patch_$DATETIME.err
+  if [[ $? -eq 0 ]]
+  then
+    echo "DONE"
+  else
+    echo "FAILED"
+  fi
+fi
+
+# Apply any oneoff patches
+if [[ $LIST_OF_ONEOFF != '' ]]
+then
+  echo "$LIST_OF_ONEOFF" | while read patch
+  do
+    PATCH_NO=`echo $patch | awk -F/ '{print $NF}'`
+    PATCH=`echo $patch | cut -d= -f2`
+    echo "Applying oneoff patch $PATCH_NO" | awk '{printf "%-100s",$0}'
+    if [[ $VERSION = '11g' ]]
+    then
+      env ORACLE_HOME=$NEW_ORACLE_HOME $NEW_ORACLE_HOME/OPatch/opatch napply -silent -force_conflict -local $PATCH -oh $NEW_ORACLE_HOME -ocmrf $SCR_DIR/ocm_11g.rsp >> $LOG_DIR/$HOSTNAME/oneoff_patch_$DATETIME.log 2>$LOG_DIR/$HOSTNAME/oneoff_patch_$DATETIME.err
+    else
+      env ORACLE_HOME=$NEW_ORACLE_HOME $NEW_ORACLE_HOME/OPatch/opatch napply -silent -force_conflict -local $PATCH -oh $NEW_ORACLE_HOME >> $LOG_DIR/$HOSTNAME/oneoff_patch_$DATETIME.log 2>$LOG_DIR/$HOSTNAME/oneoff_patch_$DATETIME.err
+    fi
+    if [[ $? -eq 0 ]]
+    then
+      echo "DONE"
+    else
+      echo "FAILED"
+    fi
+  done
+fi
+
+echo "Running OCW postpatch script..." | awk '{printf "%-100s",$0}'
+chmod 755 $OCW_PATCH/custom/scripts/postpatch.sh
+$OCW_PATCH/custom/scripts/postpatch.sh -dbhome $NEW_ORACLE_HOME >> $LOG_DIR/$HOSTNAME/ocw_patch_$DATETIME.log
+if [[ $? -eq 0 ]]
+then
+  echo "DONE"
+else
+  echo "FAILED"
+fi
+
+# Check patch status
+LSPATCHES=`$NEW_ORACLE_HOME/OPatch/opatch lspatches`
+echo "Checking if Proactive Bundled Patch exists in $NEW_ORACLE_HOME..." | awk '{printf "%-100s",$0}'
+if [[ `echo "$LSPATCHES" | grep $PROACTIVE_BP_PATCH_NUMBER | wc -l` -eq 1 ]]
+then
+  echo "YES"
+else
+  echo "NO"
+fi
+
+echo "Checking if OCW Patch exists in $NEW_ORACLE_HOME..." | awk '{printf "%-100s",$0}'
+if [[ `echo "$LSPATCHES" | grep $OCW_PATCH_NUMBER | wc -l` -eq 1 ]]
+then
+  echo "YES"
+else
+  echo "NO"
+fi
+
+if [[ $PATCH_TYPE = 'SAP' ]]
+then
+  echo "Checking if SAP Bundled Patch exists in $NEW_ORACLE_HOME..." | awk '{printf "%-100s",$0}'
+  if [[ `echo "$LSPATCHES" | grep SBP | grep $PATCH_NAME | wc -l` -eq 1 ]]
+  then
+    echo "YES"
+  else
+    echo "NO"
+  fi
+fi
+
+if [[ $OJVM_PATCH != '' ]]
+then
+  echo "Checking if OJVM Patch exists in $NEW_ORACLE_HOME..." | awk '{printf "%-100s",$0}'
+  OJVM_PATCH_NUMBER=`echo $OJVM_PATCH | awk -F/ '{print $NF}'`
+  if [[ `echo "$LSPATCHES" | grep $OJVM_PATCH_NUMBER | wc -l` -eq 1 ]]
+  then
+    echo "YES"
+  else
+    echo "NO"
+  fi
+fi
+
+if [[ $LIST_OF_ONEOFF != '' ]]
+then
+  echo "$LIST_OF_ONEOFF" | while read patch
+  do
+    PATCH_NO=`echo $patch | awk -F/ '{print $NF}'`
+    echo "Checking if oneoff patch $PATCH_NO exists in $NEW_ORACLE_HOME..." | awk '{printf "%-100s",$0}'
+    if [[ `echo "$LSPATCHES" | grep $PATCH_NO | wc -l` -eq 1 ]]
+    then
+      echo "YES"
+    else
+      echo "NO"
+    fi
+  done
+fi
