@@ -1,0 +1,392 @@
+PRIMARY_TNS_NAME=$1
+STANDBY_TNS_NAME=$2
+PRIMARY_DB_UNIQUE_NAME=`echo`
+export ORACLE_SID=dwcotst1
+export DB_UNIQUE_NAME=dwcotst
+export PRIMARY_DB_UNIQUE_NAME=dwcotst
+export STANDBY_DB_UNIQUE_NAME=dwcotst_new
+export ORACLE_HOME=/u01/app/oracle/product/19.0.0.0/dbhome_1
+export PATH=$PATH:$ORACLE_HOME/bin
+RESTORE_LOG_DIR=~/rman_restore/${ORACLE_SID}
+DATE_FORMAT=`date +%Y_%m_%d_%M_%H`
+
+rman target / <<EOF
+CONFIGURE ARCHIVELOG DELETION POLICY TO SHIPPED TO ALL STANDBY BACKED UP 1 TIMES TO DISK;
+run
+{
+allocate channel c1 device type disk format '/backup01/${DB_UNIQUE_NAME}/%d_%U';
+backup spfile;
+backup current controlfile;
+}
+exit
+EOF
+
+
+${ORACLE_HOME}/bin/sqlplus / as sysdba <<EOF
+create user C##rman identified by "si2bornot!";
+grant sysdba to C##rman;
+exit
+EOF
+
+${ORACLE_HOME}/bin/sqlplus / as sysdba <<EOF
+set lines 200
+select * from v\$pwfile_users;
+exit
+EOF
+
+DG_CONFIG=$(${ORACLE_HOME}/bin/sqlplus -s / as sysdba <<EOF
+set heading off feedback off pagesize 0 trimspool on
+select value from v\$parameter where name = 'log_archive_config';
+exit
+EOF
+)
+
+NEW_DG_CONFIG=`echo ${DG_CONFIG:: -1},${STANDBY_DB_UNIQUE_NAME}\)`
+
+if [[ -z ${NEW_DG_CONFIG} ]]
+then
+    NEW_DG_CONFIG="dg_config=(${DB_UNIQUE_NAME},${DB_UNIQUE_NAME}_new)"
+fi
+
+
+${ORACLE_HOME}/bin/sqlplus / as sysdba <<EOF
+set lines 200
+alter database force logging;
+alter system set log_archive_config='${NEW_DG_CONFIG}' scope=both sid = '*';
+alter system set log_archive_dest_3='SERVICE=${STANDBY_DB_UNIQUE_NAME} LGWR ASYNC NOAFFIRM VALID_FOR=(ONLINE_LOGFILES,PRIMARY_ROLE) COMPRESSION=ENABLE DB_UNIQUE_NAME=${STANDBY_DB_UNIQUE_NAME}' scope=both sid = '*';
+alter system set log_archive_dest_state_3='ENABLE' scope=both sid = '*';
+alter system set remote_login_passwordfile='exclusive' scope=spfile sid = '*';
+alter system set standby_file_management='AUTO' scope=both sid = '*';
+exit
+EOF
+
+
+
+PRIMARY_PASSWORD_FILE_LOC=`${ORACLE_HOME}/bin/srvctl config database -d ${DB_UNIQUE_NAME} -v|grep 'Password'|awk '{print $3}'`
+asmcmd pwcopy ${PRIMARY_PASSWORD_FILE_LOC} /backup01/${DB_UNIQUE_NAME}/orapw${DB_UNIQUE_NAME}
+ls -ltrh /backup01/${DB_UNIQUE_NAME}/orapw${DB_UNIQUE_NAME}
+
+
+
+
+INSTANCES_HOSTS=`${ORACLE_HOME}/bin/srvctl config database -d ${DB_UNIQUE_NAME} -v|grep 'Configured nodes'|awk '{print $3}'`
+IFS=, read -a INSTANCES_HOSTS <<< "${INSTANCES_HOSTS}"
+
+for i in "${INSTANCES_HOSTS[@]}"; do
+    echo "$i"
+done
+
+
+
+sqlplus / as sysdba <<EOF
+ alter system set log_archive_dest_state_3=defer scope=both;
+ alter system switch logfile;
+alter system set log_archive_dest_state_3=enable scope=both;
+ select dest_id,DEST_NAME,STATUS,ERROR,db_unique_name  from V\$ARCHIVE_DEST_STATUS where DEST_ID = 3;
+EOF
+
+sqlplus / as sysdba <<EOF
+ select dest_id,DEST_NAME,STATUS,ERROR,db_unique_name  from V\$ARCHIVE_DEST_STATUS where DEST_ID = 3;
+EOF
+
+
+rman target / <<EOF
+run
+{
+    backup archivelog from logseq=6800 thread=1;
+    backup archivelog from logseq=4100 thread=2;
+}
+EOF
+
+
+
+NUM_OF_INSTANCES=2
+for INSTANCE in $NUM_OF_INSTANCES
+do
+    SIZE_OF_CURRENT_UNDO=$(${ORACLE_HOME}/bin/sqlplus -s / as sysdba <<EOF
+    set heading off feedback off pagesize 0 trimspool on
+    select round(round(sum(bytes/1024/1024/1024))/31) from v\$datafile where ts# in (select ts# from v\$tablespace where name like 'UNDO%');
+EOF
+)
+    sqlplus / as sysdba <<EOF
+    create undo tablespace UNDOTBS0${INSTANCE} datafile '+DATAC1' size 31G autoextend on;
+EOF
+    NUMBER_OF_UNDO_FILES=`echo $((${SIZE_OF_CURRENT_UNDO}-1))`
+    for UNDO in `seq 1 $NUMBER_OF_UNDO_FILES`
+    do
+        sqlplus / as sysdba <<EOF
+        alter tablespace UNDOTBS0${INSTANCE} add datafile '+DATAC1' size 31G autoextend on;
+        exit
+EOF
+    done
+
+done
+
+
+
+
+
+
+
+
+
+
+export ORACLE_SID=dwcotst
+export DB_UNIQUE_NAME=dwcotst_new
+export PRIMARY_DB_UNIQUE_NAME=dwcotst
+export ORACLE_HOME=/u01/app/oracle/product/19.0.0.0/dbhome_1
+export PATH=$PATH:$ORACLE_HOME/bin
+RESTORE_LOG_DIR=~/rman_restore/${ORACLE_SID}
+DATE_FORMAT=`date +%Y_%m_%d_%M_%H`
+AUDIT_FILE_DEST=/u01/app/oracle/admin/${ORACLE_SID}/adump
+
+mkdir -p /u01/app/oracle/admin/${ORACLE_SID}/adump
+mkdir -p /u01/app/oracle/diag/rdbms/${ORACLE_SID}/${ORACLE_SID}/cdump
+mkdir -p ${RESTORE_LOG_DIR}
+
+
+echo "DB_NAME='dwcotst'" > $ORACLE_HOME/dbs/init${ORACLE_SID}.ora
+
+${ORACLE_HOME}/bin/sqlplus / as sysdba <<EOF
+startup nomount; 
+exit
+EOF
+
+cp /thx34_backup01/${ORACLE_SID}/orapw${ORACLE_SID} $ORACLE_HOME/dbs
+
+
+mkdir -p /thx34_backup01/linked_${ORACLE_SID}
+for i in `ls /thx34_backup01/${ORACLE_SID}/*`; do  echo "ln -s $i /thx34_backup01/linked_${ORACLE_SID}"; done |bash
+for i in `ls /thx34_backup02/${ORACLE_SID}/*`; do  echo "ln -s $i /thx34_backup01/linked_${ORACLE_SID}"; done |bash
+
+
+SECOND_NETWORK_IP=`ifconfig bondeth1|grep 'inet '|awk '{print $2}'`
+echo "LISTENER_REP=(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCOL=TCP)(HOST=${SECOND_NETWORK_IP})(PORT=1522)(KEY=LISTENER_REP))))"
+
+export CAPITAL_ORACLE_SID=dwcotst
+echo "asmcmd mkdir +DATAC1/${CAPITAL_ORACLE_SID}"|bash
+echo "asmcmd mkdir +DATAC1/${CAPITAL_ORACLE_SID}/DATAFILE"|bash
+echo "asmcmd mkdir +DATAC1/${CAPITAL_ORACLE_SID}/CONTROLFILE"|bash
+echo "asmcmd mkdir +DATAC1/${CAPITAL_ORACLE_SID}/ONLINELOG"|bash
+echo "asmcmd mkdir +RECOC1/${CAPITAL_ORACLE_SID}"|bash
+echo "asmcmd mkdir +RECOC1/${CAPITAL_ORACLE_SID}/DATAFILE"|bash
+echo "asmcmd mkdir +RECOC1/${CAPITAL_ORACLE_SID}/CONTROLFILE"|bash
+echo "asmcmd mkdir +RECOC1/${CAPITAL_ORACLE_SID}/ONLINELOG"|bash
+
+
+
+
+if [[ -z ${NEW_DG_CONFIG} ]]
+then
+    NEW_DG_CONFIG="dg_config=(${PRIMARY_DB_UNIQUE_NAME},${DB_UNIQUE_NAME})"
+fi
+
+sqlplus / as sysdba <<EOF
+alter system set log_archive_config='${NEW_DG_CONFIG}' scope=both;
+EOF
+
+
+
+
+SIZE_OF_REDO=$(${ORACLE_HOME}/bin/sqlplus -s rman/'"si2bornot!"'@${PRIMARY_DB_UNIQUE_NAME} as sysdba <<EOF
+set heading off feedback off pagesize 0 trimspool on
+select bytes/1024/1024 from v\$log where rownum = 1;
+EOF
+)
+
+sqlplus / as sysdba <<EOF
+alter database recover managed standby database cancel;
+alter database add standby logfile thread 1 group 20 ('+DATAC1','+RECOC1') size ${SIZE_OF_REDO}M;
+alter database add standby logfile thread 1 group 21 ('+DATAC1','+RECOC1') size ${SIZE_OF_REDO}M;
+alter database add standby logfile thread 1 group 22 ('+DATAC1','+RECOC1') size ${SIZE_OF_REDO}M;
+alter database add standby logfile thread 1 group 23 ('+DATAC1','+RECOC1') size ${SIZE_OF_REDO}M;
+alter database add standby logfile thread 2 group 24 ('+DATAC1','+RECOC1') size ${SIZE_OF_REDO}M;
+alter database add standby logfile thread 2 group 25 ('+DATAC1','+RECOC1') size ${SIZE_OF_REDO}M;
+alter database add standby logfile thread 2 group 26 ('+DATAC1','+RECOC1') size ${SIZE_OF_REDO}M;
+alter database add standby logfile thread 2 group 27 ('+DATAC1','+RECOC1') size ${SIZE_OF_REDO}M;
+alter database recover managed standby database using current logfile disconnect;
+EOF
+
+sqlplus / as sysdba <<EOF
+
+                select al.thrd "Thread", almax "Last Seq Received", lhmax "Last Seq Applied"
+                from (select thread# thrd, max(sequence#) almax
+                from v\$archived_log
+              where resetlogs_change#=(select resetlogs_change# from v\$database)
+              group by thread#) al,
+                (select thread# thrd, max(sequence#) lhmax
+             from v\$log_history
+              where resetlogs_change#=(select resetlogs_change# from v\$database)
+             group by thread#) lh
+            where al.thrd = lh.thrd;
+EOF
+
+sqlplus / as sysdba <<EOF
+create pfile='/tmp/init.ora' from spfile;
+create spfile='+DATAC1/dwcotst_new/spfiledwcotst.ora' from pfile='/tmp/init.ora';
+EOF
+
+
+
+srvctl add database -d dwcotst -oraclehome /u01/app/oracle/product/19.0.0.0/dbhome_1 -pwfile /u01/app/oracle/product/19.0.0.0/dbhome_1/dbs/orapwdwcotst -node thx33dbadm03 -role PHYSICAL_STANDBY -spfile +DATAC1/dwcotst_new/spfiledwcotst.ora -dbtype SINGLE -startoption MOUNT
+
+srvctl start database -d dwcotst
+
+sqlplus / as sysdba <<EOF
+-- alter system set standby_file_management = 'AUTO' scope=both;
+alter database recover managed standby database cancel;
+alter database recover managed standby database using current logfile disconnect;
+EOF
+
+rman target / <<EOF
+CONFIGURE CHANNEL 1 DEVICE TYPE DISK FORMAT   '/thx34_backup01/dwcotst/%d_%U' MAXPIECESIZE 32 G;
+CONFIGURE CHANNEL 2 DEVICE TYPE DISK FORMAT   '/thx34_backup02/dwcotst/%d_%U' MAXPIECESIZE 32 G;
+CONFIGURE CHANNEL 3 DEVICE TYPE DISK FORMAT   '/thx34_backup01/dwcotst/%d_%U' MAXPIECESIZE 32 G;
+CONFIGURE CHANNEL 4 DEVICE TYPE DISK FORMAT   '/thx34_backup02/dwcotst/%d_%U' MAXPIECESIZE 32 G;
+run
+{
+restore archivelog from logseq=8600 thread=1;
+restore archivelog from logseq=7100 thread=2;
+}
+EOF
+
+rman target rman_clone/"auxiliary / <<EOF
+
+RMAN> connect auxiliary /
+
+connected to auxiliary database: DWMEPRD (not mounted)
+
+RMAN>  connect target rman_clone/"S!2bornot000000"@DWMEPRD
+
+
+rman auxiliary / 
+connect target rman_clone/"S!2bornot000000"@DWMEPRD
+run
+{
+duplicate target database to dwmeprdc from active database
+SPFILE
+set db_unique_name='DWMEPRDC'
+set db_create_file_dest='+DATAC1'
+set db_create_online_log_dest_1='+RECOC1'
+set cluster_database='FALSE'
+set db_recovery_file_dest='+RECOC1'
+set db_recovery_file_dest_size='5000G'
+set log_archive_dest_1='LOCATION=USE_DB_RECOVERY_FILE_DEST'
+set audit_file_dest='/u01/app/oracle/admin/dwmeprd'
+set control_Files='+RECOC1'
+set sga_max_size='40G'
+set sga_target='40G'
+reset local_listener;
+}
+exit
+EOF
+
+rman auxiliary / <<EOF
+run
+{
+allocate auxiliary channel c1 device type disk;
+allocate auxiliary channel c2 device type disk;
+allocate auxiliary channel c3 device type disk;
+allocate auxiliary channel c4 device type disk;
+allocate auxiliary channel c5 device type disk;
+allocate auxiliary channel c6 device type disk;
+allocate auxiliary channel c7 device type disk;
+allocate auxiliary channel c8 device type disk;
+allocate auxiliary channel c9 device type disk;
+allocate auxiliary channel c10 device type disk;
+allocate auxiliary channel c11 device type disk;
+allocate auxiliary channel c12 device type disk;
+allocate auxiliary channel c13 device type disk;
+allocate auxiliary channel c14 device type disk;
+allocate auxiliary channel c15 device type disk;
+allocate auxiliary channel c16 device type disk;
+allocate auxiliary channel c17 device type disk;
+allocate auxiliary channel c18 device type disk;
+allocate auxiliary channel c19 device type disk;
+allocate auxiliary channel c20 device type disk;
+duplicate database for standby until time "to_date('30-NOV-2022 18:00:00','DD-MON-YYYY HH24:MI:SS')"
+SPFILE
+set db_unique_name='${DB_UNIQUE_NAME}'
+set db_create_file_dest='+DATAC1'
+set db_create_online_log_dest_1='+RECOC1'
+set cluster_database='FALSE'
+set db_recovery_file_dest='+RECOC1'
+set db_recovery_file_dest_size='5000G'
+set log_archive_dest_1='LOCATION=USE_DB_RECOVERY_FILE_DEST'
+set log_archive_dest_3='SERVICE=${STANDBY_DB_UNIQUE_NAME} LGWR ASYNC NOAFFIRM VALID_FOR=(ONLINE_LOGFILES,PRIMARY_ROLE) COMPRESSION=ENABLE DB_UNIQUE_NAME=${STANDBY_DB_UNIQUE_NAME}'
+set audit_file_dest='${AUDIT_FILE_DEST}'
+set fal_server='${STANDBY_DB_UNIQUE_NAME}'
+set sga_max_size='16G'
+set sga_target='16G'
+set shared_pool_size='5G'
+reset local_listener
+backup location '/thx34_backup01/linked_${ORACLE_SID}/' nofilenamecheck;
+exit
+EOF
+
+srvctl add database -d dwcotst -oraclehome /u01/app/oracle/product/19.0.0.0/dbhome_1 -pwfile /u01/app/oracle/product/19.0.0.0/dbhome_1/dbs/orapwdwcotst -node thx33dbadm03 -role PHYSICAL_STANDBY -spfile +DATAC1/dwcotst_new/spfiledwcotst.ora -dbtype SINGLE -startoption MOUNT
+
+
+LATEST_CONTROLFILE_BACKUP=`ls -ltrh /thx34_backup0*/dwcotst/c-*|tail -n 1|awk '{print $9}'`
+
+rman target / <<EOF
+restore controlfile from '${LATEST_CONTROLFILE_BACKUP}';
+alter database mount;
+CONFIGURE DEVICE TYPE DISK PARALLELISM 20 BACKUP TYPE TO COMPRESSED BACKUPSET;
+exit
+EOF
+
+
+
+
+
+rman target / <<EOF
+CONFIGURE CHANNEL 1 DEVICE TYPE DISK CLEAR;
+CONFIGURE CHANNEL 2 DEVICE TYPE DISK CLEAR;
+CONFIGURE CHANNEL 3 DEVICE TYPE DISK CLEAR;
+CONFIGURE CHANNEL 4 DEVICE TYPE DISK CLEAR;
+catalog start with '/thx34_backup01/${ORACLE_SID}/' noprompt;
+catalog start with '/thx34_backup02/${ORACLE_SID}/' noprompt;
+catalog start with '/thx34_backup03/${ORACLE_SID}/' noprompt;
+catalog start with '/thx34_backup04/${ORACLE_SID}/' noprompt;
+exit
+EOF
+
+
+
+
+
+
+
+
+
+export ORACLE_SID=dwcotst
+export ORACLE_HOME=/u01/app/oracle/product/19.0.0.0/dbhome_1
+export PATH=$PATH:$ORACLE_HOME/bin
+RESTORE_LOG_DIR=~/rman_restore/${ORACLE_SID}
+DATE_FORMAT=`date +%Y_%m_%d_%M_%H`
+
+date 
+
+rman target / LOG=${RESTORE_LOG_DIR}/RESTORE_${DATE_FORMAT}.log <<EOF
+set until time "to_date('15/11/2022 19:00:00′,'dd/mm/yyyy hh24:mi:ss')";
+restore database;
+recover database;
+alter database open resetlogs;
+EOF
+
+date
+
+
+
+rman target / <<EOF
+run
+{
+    restore archivelog from logseq=6800 thread=1;
+    restore archivelog from logseq=4100 thread=2;
+}
+EOF
+
+
+
+
