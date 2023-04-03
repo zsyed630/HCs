@@ -13,6 +13,47 @@ alter database recover managed standby database using current logfile disconnect
               where resetlogs_change#=(select resetlogs_change# from v$database)
              group by thread#) lh
             where al.thrd = lh.thrd;
+            
+            
+IS_APPLYING_LOG=$($ORACLE_HOME/bin/sqlplus -s sys/${SYS_PWD}@${TARGET_DB_UNIQUE_NAME} as sysdba <<EOF
+set lines 100 heading off feedback off pagesize 0 trimspool off
+select status from v\$managed_standby where process like 'MRP%';
+exit
+EOF
+)
+
+if [[ "${IS_APPLYING_LOG}" != "APPLYING_LOG" ]]
+then
+    echo -e "===>${RED} STANDBY_DB : ${TARGET_DB_UNIQUE_NAME} MRP IS NOT RUNNING ${ENDCOLOR}"
+    continue
+else 
+    echo -e "===>${GREEN} STANDBY_DB : ${TARGET_DB_UNIQUE_NAME} MRP IS RUNNING ${ENDCOLOR}"
+fi
+
+PRIMARY_DB_CURRENT_TIME=`date +"%m/%d/%Y %T" -d "30 seconds ago"`
+
+STANDBY_DATUM_TIME=$($ORACLE_HOME/bin/sqlplus -s sys/${SYS_PWD}@${TARGET_DB_UNIQUE_NAME} as sysdba <<EOF
+set lines 100 heading off feedback off pagesize 0 trimspool off
+select datum_time from v\$dataguard_stats where name = 'apply lag';
+exit
+EOF
+)
+
+
+if grep -q "ORA-" <<< "${STANDBY_DATUM_TIME}"
+then
+    echo -e "===>${RED} STANDBY_DB : ${TARGET_DB_UNIQUE_NAME} CANT CONNECT ${ENDCOLOR}"
+    continue
+fi
+
+if [[ $STANDBY_DATUM_TIME > $PRIMARY_DB_CURRENT_TIME ]] && [[ "${IS_APPLYING_LOG}" == "APPLYING_LOG" ]]
+then
+    echo -e "===>${GREEN} STANDBY_DB : ${TARGET_DB_UNIQUE_NAME} IS IN SYNC WITH PRIMARY ${STANDBY_DATUM_TIME} ${ENDCOLOR}"
+else
+    echo -e "===>${RED} STANDBY_DB : ${TARGET_DB_UNIQUE_NAME} IS BEHIND PRIMARY ${STANDBY_DATUM_TIME} ${ENDCOLOR}"
+fi
+            
+    
 
 
 /oracle/stagenfs/scripts/shell/connect_all_dr.ksh PHYSICAL_STANDBY /oracle/stagenfs/scripts/sql/start_managed_recovery_cl.sql
