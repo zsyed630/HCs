@@ -14,13 +14,19 @@ alter database recover managed standby database using current logfile disconnect
              group by thread#) lh
             where al.thrd = lh.thrd;
             
+ export PRIMARY_DB_UNIQUE_NAME=osoap           
+ sqlplus sys/`cat /home/oracle/.key`@$PRIMARY_DB_UNIQUE_NAME as sysdba <<EOF           
  alter system set log_archive_dest_state_3=defer scope=both;
-
  alter system switch logfile;
-
 alter system set log_archive_dest_state_3=enable scope=both;
-
  select dest_id,DEST_NAME,STATUS,ERROR,db_unique_name  from V$ARCHIVE_DEST_STATUS where DEST_ID = 3;
+EOF
+
+sqlplus sys/`cat /home/oracle/.key`@$PRIMARY_DB_UNIQUE_NAME as sysdba <<EOF
+select dest_id,DEST_NAME,STATUS,ERROR,db_unique_name  from V$ARCHIVE_DEST_STATUS where DEST_ID = 3;
+EOF
+ 
+ 
             
 GREEN="\033[1;32;40m"
 RED="\033[1;31;40m"
