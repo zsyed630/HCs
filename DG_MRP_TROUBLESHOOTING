@@ -14,6 +14,11 @@ alter database recover managed standby database using current logfile disconnect
              group by thread#) lh
             where al.thrd = lh.thrd;
             
+GREEN="\033[1;32;40m"
+RED="\033[1;31;40m"
+NORM="\033[0m"
+ENDCOLOR="\e[0m"
+            
             
 IS_APPLYING_LOG=$($ORACLE_HOME/bin/sqlplus -s sys/${SYS_PWD}@${TARGET_DB_UNIQUE_NAME} as sysdba <<EOF
 set lines 100 heading off feedback off pagesize 0 trimspool off
