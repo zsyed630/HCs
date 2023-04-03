@@ -14,6 +14,14 @@ alter database recover managed standby database using current logfile disconnect
              group by thread#) lh
             where al.thrd = lh.thrd;
             
+ alter system set log_archive_dest_state_3=defer scope=both;
+
+ alter system switch logfile;
+
+alter system set log_archive_dest_state_3=enable scope=both;
+
+ select dest_id,DEST_NAME,STATUS,ERROR,db_unique_name  from V$ARCHIVE_DEST_STATUS where DEST_ID = 3;
+            
 GREEN="\033[1;32;40m"
 RED="\033[1;31;40m"
 NORM="\033[0m"
