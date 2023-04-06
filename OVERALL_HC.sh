@@ -1,14 +1,19 @@
+#!/bin/bash
 GREEN="\033[1;32;40m"
 RED="\033[1;31;40m"
 NORM="\033[0m"
 ENDCOLOR="\e[0m"
 HOST_NAME=`hostname`
 GRID_HOME=`cat /etc/oratab|grep '+ASM'|awk -F ':' '{print $2}'`
-SYS_PWD=`cat /oracle/stagenfs/scripts/shell/.key_dbe_mon`
+SYS_PWD=`cat /home/oracle/dba/scripts/.key_sys`
+TBSP_PERCENT_USED=90
+ASM_PERCENT_USED=95
+FRA_PERCENT_USED=90
+MAILLIST=oracleoem@cadencehealth.org
 DB=$1
 
-
-
+echo "################################################################################################################################################################################################################"
+export ORACLE_HOME=$GRID_HOME
 ASM_IS_RUNNING=`${GRID_HOME}/bin/srvctl status asm`
 
 if grep -q "ASM is not running" <<< "${ASM_IS_RUNNING}"
@@ -16,9 +21,29 @@ then
     echo -e "${RED}ASM : ASM IS NOT RUNNING${ENDCOLOR}"
 else
     echo -e "${GREEN}ASM : ASM IS UP AND RUNNING${ENDCOLOR}"
+    ORACLE_SID=`ps -ef|grep pmon|grep '+ASM'|awk '{print $8}'|awk -F "_" '{print $3}'`
+    export ORACLE_SID=$ORACLE_SID
+    ORACLE_HOME=$GRID_HOME
+    ASM_DSKGRP_USAGE=$($ORACLE_HOME/bin/sqlplus -s / as sysdba <<EOF
+    set lines 200 heading off feedback off pagesize 0 trimspool off
+    select '===> ASM_DISKGROUP : '||DGNAME||' PERCENT USED IS GREATER THAN ${ASM_PERCENT_USED}' from (select dg.name "DGNAME", to_char(NVL(dg.total_mb,0)) "Total MB", to_char(NVL(dg.free_mb, 0)) "Free MB", type "Type", to_char(NVL(dg.usable_file_mb, 0)) "Usable Free MB", to_char(NVL(dg.required_mirror_free_mb, 0)) "ReqMirrorFree", decode(type, 'EXTERN', 1, 'NORMAL', 2, 'HIGH', 3, 1) redundancy_factor, (100 - (dg.usable_file_mb/((dg.total_mb - dg.required_mirror_free_mb)/ decode(type, 'EXTERN', 1, 'NORMAL', 2, 'HIGH', 3, 1)))*100) "PERCENT_USED" from V\$ASM_DISKGROUP_STAT dg where state = 'MOUNTED') where PERCENT_USED > ${ASM_PERCENT_USED};
+EOF
+)
+    if [[ -z $ASM_DSKGRP_USAGE ]]
+    then
+        echo -e "===>${GREEN} ASM_DISKGROUP : PASS, NO ASM_DISKGROUPS OVER ${ASM_PERCENT_USED}% ${ENDCOLOR}"
+    else
+        echo -e "${RED}$ASM_DSKGRP_USAGE${ENDCOLOR}"|sed 's/ //'
+        ASM_ECHOED_MESSAGE=`echo ${RED}$ASM_DSKGRP_USAGE${ENDCOLOR}|sed 's/ //'`
+        echo -e "$ASM_ECHOED_MESSAGE" | mail -s "ASM ON ${HOST_NAME} ASM_DISKGROUP : DANGER, OVER ${ASM_PERCENT_USED}% USED" oracleoem@cadencehealth.org,zainuddin.syed@nm.org
+    fi
+
 fi
+echo ""
 
-
+unset ORACLE_HOME
+unset ORACLE_SID
+echo "################################################################################################################################################################################################################"
 LISTENER_IS_RUNNING=`${GRID_HOME}/bin/srvctl status listener -v|awk 'NR==2'`
 
 if grep -q "Listener LISTENER is not running" <<< "${LISTENER_IS_RUNNING}"
@@ -27,6 +52,8 @@ then
 else
     echo -e "${GREEN}LISTENER : LISTENER IS UP AND RUNNING${ENDCOLOR}"
 fi
+
+echo ""
 
 if [[ -n $DB ]]
 then
@@ -37,9 +64,8 @@ fi
 
 for db in `echo $CHECK_SPECIFIC`
 do
-    echo ""
-#    echo "======================================================================================"
-    ORACLE_HOME=`${GRID_HOME}/bin/srvctl config database -d ${db} |grep 'home'|awk '{print $3}'`
+    echo "################################################################################################################################################################################################################"
+    ORACLE_HOME=`${GRID_HOME}/bin/srvctl config database -d ${db} |grep 'Oracle home'|awk '{print $3}'`
     export ORACLE_HOME=$ORACLE_HOME
     INSTANCES=`${ORACLE_HOME}/bin/srvctl config database -d ${db} |grep 'instances'|awk '{print $3}'`
     SERVICES=`${ORACLE_HOME}/bin/srvctl config database -d ${db} |grep 'Service'|awk '{print $2}'`
@@ -50,10 +76,12 @@ do
 
     if [[ -z $DBTYPE ]]
     then
+        ORACLE_SID=`${ORACLE_HOME}/bin/srvctl config database -d ${db} |grep 'instance'|awk '{print $3}'`
+        export ORACLE_SID=$ORACLE_SID
         DB_IS_RUNNING=`${ORACLE_HOME}/bin/srvctl status database -d ${db} -v`
         if grep -q "Instance status: Open" <<< "${DB_IS_RUNNING}"
         then
-            echo -e "${GREEN}DB : ${db} IS UP AND RUNNING WITH INSTANCE ${ORACLE_SID} ${ENDCOLOR}"
+            echo -e "===>${GREEN} DB : ${db} IS UP AND RUNNING WITH INSTANCE ${ORACLE_SID} ${ENDCOLOR}"
             for SERVICE in $(echo $SERVICES | sed "s/,/ /g")
             do
                 IS_SERVICE_RUNNING=`${ORACLE_HOME}/bin/srvctl status service -d ${db} -s ${SERVICE} -v`
@@ -70,7 +98,7 @@ do
         fi
     else
         DB_IS_RUNNING=`${ORACLE_HOME}/bin/srvctl status database -d ${db} -v`
-        
+
         if grep -q "is running" <<< "${DB_IS_RUNNING}"
         then
             for INSTANCE in $(echo $INSTANCES | sed "s/,/ /g")
@@ -114,7 +142,7 @@ do
                             then
                                 continue
                             else
-                                echo -e "   ===>${RED} ${db} SERVICE : $SERVICE IS RUNNING BUT PREFERRED INSTANCE ${SERVICE_PREF_INSTANCE} DOESNT HAVE ${SERVICE} RUNNING ${ENDCOLOR}"
+                                echo -e "===>${RED} ${db} SERVICE : $SERVICE IS RUNNING BUT PREFERRED INSTANCE ${SERVICE_PREF_INSTANCE} DOESNT HAVE ${SERVICE} RUNNING ${ENDCOLOR}"
                             fi
                         done
                     fi
@@ -129,30 +157,48 @@ do
     fi
 
     SCAN_NAME=`${GRID_HOME}/bin/srvctl config scan |grep 'SCAN name:'|awk '{print $3}'|sed "s/,/ /g"|xargs`
+    if [[ -z $SCAN_NAME ]]
+    then
+        HOST_NAME=`hostname -s`
+        SCAN_NAME=$HOST_NAME
+    fi
+
     SCAN_PORT=`${GRID_HOME}/bin/srvctl config scan_listener|grep 'Endpoints: TCP'|awk '{print $2}'|awk -F ":" '{print $2}'`
+    if [[ -z $SCAN_PORT ]]
+    then
+        LSNR_NAME=`ps -ef|grep lsnr|grep -v grep|awk '{print $9}'|awk 'NR == 1' `
+        ADDRESS=`$ORACLE_HOME/bin/lsnrctl status $LSNR_NAME|grep PORT|awk '{print $3}'`
+        SCAN_PORT=`echo "${ADDRESS#*PORT=}"|sed 's/)//g'`
+    fi
     DB_UNIQ_SERVICE=`${ORACLE_HOME}/bin/srvctl config database -d ${db} -v|grep 'Database unique name'|awk '{print $4}'`
 
-    if [[ -z $DBTYPE ]] 
+    if [[ -z $DBTYPE ]]
     then
         SQLPLUS_STRING=`echo "sqlplus -s / as sysdba"`
     else
-        SQLPLUS_STRING=`echo "sqlplus -s DBE_MON/${SYS_PWD}@${SCAN_NAME}:${SCAN_PORT}/${DB_UNIQ_SERVICE} as sysdg"`
+        SQLPLUS_STRING=`echo "sqlplus -s SYS/${SYS_PWD}@${SCAN_NAME}:${SCAN_PORT}/${DB_UNIQ_SERVICE} as sysdba"`
     fi
+
 
 
     TABLESPACE_OUTPUT=$($ORACLE_HOME/bin/${SQLPLUS_STRING} <<EOF
     set heading off feedback off pagesize 0 trimspool on lines 200
     set serverout on
-    DECLARE 
+    DECLARE
     NUM_OF_DATAFILES number;
     NUM_OF_NON_AUTOEXTEND_DF number;
     CURRENT_TBSP_SIZE number;
     MAX_EXTENSION_SIZE_GB number;
+    temp_tbsp_count number;
     BEGIN
         for v_uniq_tablespace_sizes in (select tablespace_name,"UPERCENT" from (select a.tablespace_name,SUM(a.bytes)/1024/1024 "CurMb",SUM(decode(b.maxextend, null, A.BYTES/1024/1024, b.maxextend*8192/1024/1024)) "MaxMb",(SUM(a.bytes)/1024/1024 - round(c."Free"/1024/1024)) "TotalUsed",(SUM(decode(b.maxextend, null, A.BYTES/1024/1024, b.maxextend*8192/1024/1024)) - (SUM(a.bytes)/1024/1024 - round(c."Free"/1024/1024))) "TotalFree",round(100*(SUM(a.bytes)/1024/1024 - round(c."Free"/1024/1024))/(SUM(decode(b.maxextend, null, A.BYTES/1024/1024, b.maxextend*8192/1024/1024)))) "UPERCENT" from dba_data_files a,sys.filext$ b,(SELECT d.tablespace_name , sum(nvl(c.bytes,0)) "Free" FROM dba_tablespaces d,DBA_FREE_SPACE c where d.tablespace_name = c.tablespace_name(+) group by d.tablespace_name) c where a.file_id = b.file#(+) and a.tablespace_name = c.tablespace_name GROUP by a.tablespace_name, c."Free"/1024 order by round(100*(SUM(a.bytes)/1024/1024 - round(c."Free"/1024/1024))/(SUM(decode(b.maxextend, null, A.BYTES/1024/1024, b.maxextend*8192/1024/1024)))) desc))
         LOOP
-            IF v_uniq_tablespace_sizes.UPERCENT > 49 THEN
-                dbms_output.put_line('TABLESPACE : '||v_uniq_tablespace_sizes.tablespace_name||' NEEDS DATAFILE ADDED AS 90% USED WITH NO MORE EXTENSION LEFT');
+            select count(*) into temp_tbsp_count from dba_temp_files where tablespace_name = v_uniq_tablespace_sizes.tablespace_name;
+            IF temp_tbsp_count > 0 THEN
+                continue;
+            END IF;
+            IF v_uniq_tablespace_sizes.UPERCENT > ${TBSP_PERCENT_USED} THEN
+                dbms_output.put_line('===> TABLESPACE : '||v_uniq_tablespace_sizes.tablespace_name||' NEEDS DATAFILE ADDED AS ${TBSP_PERCENT_USED}% USED WITH NO MORE EXTENSION LEFT');
             END IF;
         END LOOP;
     END;
@@ -164,11 +210,29 @@ EOF
 
     if [[ -z $TABLESPACE_OUTPUT ]]
     then
-        echo -e "===>${GREEN} TABLESPACE_SIZE_CHECKS : PASS, NO TBSPs OVER 90% ${ENDCOLOR}"
+        echo -e "===>${GREEN} TABLESPACE_SIZE_CHECKS : PASS, NO TBSPs OVER ${TBSP_PERCENT_USED}% ${ENDCOLOR}"
     else
         echo -e "${RED}$TABLESPACE_OUTPUT${ENDCOLOR}"|sed 's/ //'
+        TBSP_ECHOED_MESSAGE=`echo ${RED}$TABLESPACE_OUTPUT${ENDCOLOR}|sed 's/ //'`
+        echo -e "$TBSP_ECHOED_MESSAGE" | mail -s "${db} TABLESPACE_SIZE_CHECKS : DANGER, OVER ${TBSP_PERCENT_USED}% USED" oracleoem@cadencehealth.org,zainuddin.syed@nm.org
     fi
 
+
+    FRA_SPACE_USAGE_PERCENT=$($ORACLE_HOME/bin/${SQLPLUS_STRING} <<EOF
+    set heading off feedback off pagesize 0 trimspool on lines 200
+    select round((space_used/space_limit)*100) from v\$recovery_file_dest;
+EOF
+)
+
+
+
+    if [[ $FRA_SPACE_USAGE_PERCENT -ge $FRA_PERCENT_USED ]]
+    then
+        echo -e "===>${RED} FRA_SPACE_CHECK : DANGER, OVER ${FRA_PERCENT_USED}% USED ${ENDCOLOR}"
+        echo "===>${RED} FRA_SPACE_CHECK : DANGER, OVER ${FRA_PERCENT_USED}% USED ${ENDCOLOR}" | mail -s "${db} FRA_SPACE_CHECK : DANGER, OVER ${FRA_PERCENT_USED}% USED" oracleoem@cadencehealth.org,zainuddin.syed@nm.org
+    else
+        echo -e "===>${GREEN} FRA_SPACE_CHECK : PASS, FRA IS ${FRA_PERCENT_USED}% ${ENDCOLOR}"
+    fi
 
 
 
@@ -190,7 +254,7 @@ EOF
     if [[ ${DBROLE} == "PHYSICAL_STANDBY" ]]
     then
         continue
-    else  
+    else
         AAS_PAST_FIFTEEN_MINS=$($ORACLE_HOME/bin/${SQLPLUS_STRING} <<EOF
         set heading off feedback off pagesize 0 trimspool on
         select round(AAS) from ( select ( select count(*) from gv\$active_session_history where sample_time > sysdate - interval '15' minute AND user_id <> 0 and session_type = 'FOREGROUND' and session_state in ('WAITING','CPU'))/(2*60) as AAS from dual);
@@ -319,7 +383,7 @@ EOF
 
                     IS_APPLYING_LOG=$($ORACLE_HOME/bin/sqlplus -s sys/${SYS_PWD}@${STANDBY_DB_UNIQUE_NAME} as sysdba <<EOF
                     set lines 100 heading off feedback off pagesize 0 trimspool off
-                    select status from v\$managed_standby where process like 'MRP%';
+                    select status from gv\$managed_standby where process like 'MRP%';
                     exit
 EOF
 )
@@ -331,8 +395,8 @@ EOF
                     fi
 
                     STANDBY_DATUM_TIME=$($ORACLE_HOME/bin/sqlplus -s sys/${SYS_PWD}@${STANDBY_DB_UNIQUE_NAME} as sysdba <<EOF
-                    set lines 100 heading off feedback off pagesize 0 trimspool off
-                    select datum_time from v\$dataguard_stats where name = 'apply lag';
+                    set lines 200 heading off feedback off pagesize 0 trimspool off
+                    select datum_time from gv\$dataguard_stats where name = 'apply lag' and DATUM_TIME is not null;
                     exit
 EOF
 )
@@ -352,7 +416,6 @@ EOF
             fi
         done
     fi
-        unset IFS    
+    echo ""
+        unset IFS
 done
-
-
