@@ -6,10 +6,10 @@ ENDCOLOR="\e[0m"
 HOST_NAME=`hostname`
 GRID_HOME=`cat /etc/oratab|grep '+ASM'|awk -F ':' '{print $2}'`
 SYS_PWD=`cat /home/oracle/dba/scripts/.key_sys`
-TBSP_PERCENT_USED=90
+TBSP_PERCENT_USED=1
 ASM_PERCENT_USED=95
 FRA_PERCENT_USED=90
-MAILLIST=oracleoem@cadencehealth.org
+MAILLIST=
 DB=$1
 
 echo "################################################################################################################################################################################################################"
@@ -35,7 +35,7 @@ EOF
     else
         echo -e "${RED}$ASM_DSKGRP_USAGE${ENDCOLOR}"|sed 's/ //'
         ASM_ECHOED_MESSAGE=`echo ${RED}$ASM_DSKGRP_USAGE${ENDCOLOR}|sed 's/ //'`
-        echo -e "$ASM_ECHOED_MESSAGE" | mail -s "ASM ON ${HOST_NAME} ASM_DISKGROUP : DANGER, OVER ${ASM_PERCENT_USED}% USED" oracleoem@cadencehealth.org,zainuddin.syed@nm.org
+        echo -e "$ASM_ECHOED_MESSAGE" | mail -s "ASM ON ${HOST_NAME} ASM_DISKGROUP : DANGER, OVER ${ASM_PERCENT_USED}% USED" zsyed@deltadentalmi.com
     fi
 
 fi
@@ -156,6 +156,7 @@ do
         fi
     fi
 
+
     SCAN_NAME=`${GRID_HOME}/bin/srvctl config scan |grep 'SCAN name:'|awk '{print $3}'|sed "s/,/ /g"|xargs`
     if [[ -z $SCAN_NAME ]]
     then
@@ -178,6 +179,206 @@ do
     else
         SQLPLUS_STRING=`echo "sqlplus -s SYS/${SYS_PWD}@${SCAN_NAME}:${SCAN_PORT}/${DB_UNIQ_SERVICE} as sysdba"`
     fi
+
+    IS_PDB=$($ORACLE_HOME/bin/${SQLPLUS_STRING} <<EOF
+    set heading off feedback off pagesize 0 trimspool on lines 200
+    select cdb from v\$database;
+EOF
+)
+
+    if [[ ${IS_PDB} == "YES" ]]
+    then
+        PDB_NAMES=$($ORACLE_HOME/bin/${SQLPLUS_STRING} <<EOF
+        set heading off feedback off pagesize 0 trimspool on lines 200
+        select name from v\$pdbs where name <> 'PDB\$SEED';
+EOF
+)
+        NEW_PDB_NAMES=`echo ${PDB_NAMES}|tr ' ' '\n'`
+        echo -e ""
+        for PDB in `echo ${PDB_NAMES}|tr ' ' '\n'`
+        do
+            export ORACLE_PDB_SID=$PDB
+            echo -e "===>${GREEN} DB CHECKS FOR PDB $PDB IN ${db}${ENDCOLOR}"
+            TABLESPACE_OUTPUT=$($ORACLE_HOME/bin/${SQLPLUS_STRING} <<EOF
+            set heading off feedback off pagesize 0 trimspool on lines 200
+            set serverout on
+            DECLARE
+            NUM_OF_DATAFILES number;
+            NUM_OF_NON_AUTOEXTEND_DF number;
+            CURRENT_TBSP_SIZE number;
+            MAX_EXTENSION_SIZE_GB number;
+            temp_tbsp_count number;
+            BEGIN
+                for v_uniq_tablespace_sizes in (select tablespace_name,"UPERCENT" from (select a.tablespace_name,SUM(a.bytes)/1024/1024 "CurMb",SUM(decode(b.maxextend, null, A.BYTES/1024/1024, b.maxextend*8192/1024/1024)) "MaxMb",(SUM(a.bytes)/1024/1024 - round(c."Free"/1024/1024)) "TotalUsed",(SUM(decode(b.maxextend, null, A.BYTES/1024/1024, b.maxextend*8192/1024/1024)) - (SUM(a.bytes)/1024/1024 - round(c."Free"/1024/1024))) "TotalFree",round(100*(SUM(a.bytes)/1024/1024 - round(c."Free"/1024/1024))/(SUM(decode(b.maxextend, null, A.BYTES/1024/1024, b.maxextend*8192/1024/1024)))) "UPERCENT" from dba_data_files a,sys.filext$ b,(SELECT d.tablespace_name , sum(nvl(c.bytes,0)) "Free" FROM dba_tablespaces d,DBA_FREE_SPACE c where d.tablespace_name = c.tablespace_name(+) group by d.tablespace_name) c where a.file_id = b.file#(+) and a.tablespace_name = c.tablespace_name GROUP by a.tablespace_name, c."Free"/1024 order by round(100*(SUM(a.bytes)/1024/1024 - round(c."Free"/1024/1024))/(SUM(decode(b.maxextend, null, A.BYTES/1024/1024, b.maxextend*8192/1024/1024)))) desc))
+                LOOP
+                    select count(*) into temp_tbsp_count from dba_temp_files where tablespace_name = v_uniq_tablespace_sizes.tablespace_name;
+                    IF temp_tbsp_count > 0 THEN
+                        continue;
+                    END IF;
+                    IF v_uniq_tablespace_sizes.UPERCENT > ${TBSP_PERCENT_USED} THEN
+                        dbms_output.put_line('===> TABLESPACE : '||v_uniq_tablespace_sizes.tablespace_name||' NEEDS DATAFILE ADDED AS ${TBSP_PERCENT_USED}% USED WITH NO MORE EXTENSION LEFT');
+                    END IF;
+                END LOOP;
+            END;
+            /
+EOF
+)
+
+
+
+            if [[ -z $TABLESPACE_OUTPUT ]]
+            then
+                echo -e "===>${GREEN} TABLESPACE_SIZE_CHECKS FOR PDB $PDB IN ${db} : PASS, NO TBSPs OVER ${TBSP_PERCENT_USED}% ${ENDCOLOR}"
+            else
+                echo -e "===>${RED} TABLESPACE_SIZE_CHECKS FOR PDB $PDB IN ${db} : FAILED, TBSPs OVER ${TBSP_PERCENT_USED}% ${ENDCOLOR}"
+                echo -e "${RED}$TABLESPACE_OUTPUT${ENDCOLOR}"|sed 's/ //'
+                TBSP_ECHOED_MESSAGE=`echo ${RED}$TABLESPACE_OUTPUT${ENDCOLOR}|sed 's/ //'`
+                echo -e "$TBSP_ECHOED_MESSAGE FOR PDB $PDB" | mail -s "PDB $PDB IN ${db} TABLESPACE_SIZE_CHECKS : DANGER, OVER ${TBSP_PERCENT_USED}% USED" zsyed@deltadentalmi.com
+            fi
+
+
+            FRA_SPACE_USAGE_PERCENT=$($ORACLE_HOME/bin/${SQLPLUS_STRING} <<EOF
+            set heading off feedback off pagesize 0 trimspool on lines 200
+            select round((space_used/space_limit)*100) from v\$recovery_file_dest;
+EOF
+)
+
+
+
+            if [[ $FRA_SPACE_USAGE_PERCENT -ge $FRA_PERCENT_USED ]]
+            then
+                echo -e "===>${RED} FRA_SPACE_CHECK FOR PDB $PDB IN ${db} : DANGER, OVER ${FRA_PERCENT_USED}% USED ${ENDCOLOR}"
+                echo "===>${RED} FRA_SPACE_CHECK FOR PDB $PDB IN ${db} : DANGER, OVER ${FRA_PERCENT_USED}% USED ${ENDCOLOR}" | mail -s "${db} FRA_SPACE_CHECK : DANGER, OVER ${FRA_PERCENT_USED}% USED" zsyed@deltadentalmi.com
+            else
+                echo -e "===>${GREEN} FRA_SPACE_CHECK FOR PDB $PDB IN ${db} : PASS, FRA IS ${FRA_PERCENT_USED}% ${ENDCOLOR}"
+            fi
+
+
+
+
+            ANY_ORA_ERRORS=$($ORACLE_HOME/bin/${SQLPLUS_STRING} <<EOF
+            set heading off feedback off pagesize 0 trimspool on
+            select count(*) from v\$diag_alert_ext where originating_timestamp > systimestamp-1/24 and message_text not like 'Result = ORA-0' and message_text like 'ORA-%' order by ORIGINATING_TIMESTAMP desc;
+            exit
+EOF
+)
+            if [[ ${ANY_ORA_ERRORS} -ne 0 ]]
+            then
+                echo -e "===>${RED} ORA_ERRORS_PAST_HOUR FOR PDB $PDB IN ${db} : ${ANY_ORA_ERRORS} ERRORS${ENDCOLOR}"
+            else
+                echo -e "===>${GREEN} ORA_ERRORS_PAST_HOUR FOR PDB $PDB IN ${db} : ${ANY_ORA_ERRORS} ERRORS${ENDCOLOR}"
+            fi
+
+
+            if [[ ${DBROLE} == "PHYSICAL_STANDBY" ]]
+            then
+                continue
+            else
+                AAS_PAST_FIFTEEN_MINS=$($ORACLE_HOME/bin/${SQLPLUS_STRING} <<EOF
+                set heading off feedback off pagesize 0 trimspool on
+                select round(AAS) from ( select ( select count(*) from gv\$active_session_history where sample_time > sysdate - interval '15' minute AND user_id <> 0 and session_type = 'FOREGROUND' and session_state in ('WAITING','CPU'))/(2*60) as AAS from dual);
+                exit
+EOF
+)
+            
+                CPU_COUNT=$($ORACLE_HOME/bin/${SQLPLUS_STRING} <<EOF
+                set heading off feedback off pagesize 0 trimspool on
+                select value from v\$parameter where name = 'cpu_count';
+                exit
+EOF
+)
+
+
+                INSTANCE_COUNT=$($ORACLE_HOME/bin/${SQLPLUS_STRING} <<EOF
+                set heading off feedback off pagesize 0 trimspool on
+                select count(*) from gv\$instance;
+                exit
+EOF
+)
+                ALL_DB_CPU_COUNT=$((INSTANCE_COUNT * CPU_COUNT))
+
+                echo -e "===>${GREEN} ALL_DB_CPU_COUNT FOR PDB $PDB IN ${db} : $ALL_DB_CPU_COUNT ${ENDCOLOR}"
+                if [[ $AAS_PAST_FIFTEEN_MINS -gt $ALL_DB_CPU_COUNT ]]
+                then
+                    echo -e "===>${RED} DB_PERFORMANCE_WAIT_PAST_15_MINS FOR PDB $PDB IN ${db} : YES, METRIC_AVG_ACTIVE_SESSIONS AT ${AAS_PAST_FIFTEEN_MINS} ${ENDCOLOR}"
+                else
+                    echo -e "===>${GREEN} DB_PERFORMANCE_WAIT_PAST_15_MINS FOR PDB $PDB IN ${db} : NO ${ENDCOLOR}"
+                fi
+
+                FIFTEEN_MINS_AGO_LINUX_FORMAT=`date -d "15 minutes ago" +"%F %T"`
+                CURRENT_MIN_LINUX_FORMAT=`date +"%F %T"`
+
+                TOP_WAIT_EVENTS=$($ORACLE_HOME/bin/${SQLPLUS_STRING} <<EOF
+                set lines 100 heading off feedback off pagesize 0 trimspool off
+                select 'TOP_WAIT_EVENT_PAST_15_MINS : '||event||' WAIT_COUNT : '||cnt||',' from (select event_id, event, count(*) cnt from gv\$active_session_history where sample_time BETWEEN TIMESTAMP '${FIFTEEN_MINS_AGO_LINUX_FORMAT}' AND TIMESTAMP '${CURRENT_MIN_LINUX_FORMAT}' and wait_class_id in (select wait_class_id from (select wait_class_id, wait_class, count(*) cnt from gv\$active_session_history where sample_time BETWEEN TIMESTAMP '${FIFTEEN_MINS_AGO_LINUX_FORMAT}' AND TIMESTAMP '${CURRENT_MIN_LINUX_FORMAT}' and wait_class_id is not null group by wait_class_id, wait_class order by 3 desc) where rownum <=3 ) group by event_id, event order by 3 desc) where rownum <=3;
+                exit
+EOF
+)
+                FIRST_EVENT=`echo $TOP_WAIT_EVENTS |awk -F',' '{print $1}'`
+                SECOND_EVENT=`echo $TOP_WAIT_EVENTS |awk -F',' '{print $2}'`
+                THIRD_EVENT=`echo $TOP_WAIT_EVENTS |awk -F',' '{print $3}'`
+
+                if [[ -n "${FIRST_EVENT}" ]]
+                then
+                    echo -e "===> ${GREEN}FIRST_WAIT_EVENT FOR PDB $PDB IN ${db}${ENDCOLOR}"
+                    echo -e "===> ${GREEN}${FIRST_EVENT}${ENDCOLOR}"
+                fi
+
+                if [[ -n "${SECOND_EVENT}" ]]
+                then
+                    echo -e "===>${GREEN} SECOND_WAIT_EVENT FOR PDB $PDB IN ${db}${ENDCOLOR}"
+                    echo -e "===>${GREEN}${SECOND_EVENT}${ENDCOLOR}"
+                fi
+
+                if [[ -n "${THIRD_EVENT}" ]]
+                then
+                    echo -e "===>${GREEN} THIRD_WAIT_EVENT FOR PDB $PDB IN ${db}${ENDCOLOR}"
+                    echo -e "===>${GREEN}${THIRD_EVENT}${ENDCOLOR}"
+                fi
+
+
+                TOP_SQL_IDS_BY_WAIT_EVENTS=$($ORACLE_HOME/bin/${SQLPLUS_STRING} <<EOF
+                set lines 200 heading off feedback off pagesize 0 trimspool off
+                select 'TOP_SQL_ID_BY_WAIT : '||SQL_ID||' WITH WAIT_EVENT : '||EVENT||' AND WAIT_COUNT : '||cnt||',' from (select sql_id,event,count(*) cnt from gv\$active_session_history where sample_time BETWEEN TIMESTAMP '${FIFTEEN_MINS_AGO_LINUX_FORMAT}' AND TIMESTAMP '${CURRENT_MIN_LINUX_FORMAT}' and  event_id in (select event_id from (select event_id, event, count(*) cnt from gv\$active_session_history where sample_time BETWEEN TIMESTAMP '${FIFTEEN_MINS_AGO_LINUX_FORMAT}' AND TIMESTAMP '${CURRENT_MIN_LINUX_FORMAT}' and wait_class_id in (select wait_class_id from (select wait_class_id, wait_class, count(*) cnt from gv\$active_session_history where sample_time BETWEEN TIMESTAMP '${FIFTEEN_MINS_AGO_LINUX_FORMAT}' AND TIMESTAMP '${CURRENT_MIN_LINUX_FORMAT}' and wait_class_id is not null group by wait_class_id, wait_class order by 3 desc) where rownum <=5 ) group by event_id, event order by 3 desc) where rownum <=5) and sql_id is not null group by sql_id,event  order by 3 desc) where rownum <=3;
+                exit
+EOF
+)
+
+                FIRST_SQL_ID=`echo $TOP_SQL_IDS_BY_WAIT_EVENTS |awk -F',' '{print $1}'`
+                SECOND_SQL_ID=`echo $TOP_SQL_IDS_BY_WAIT_EVENTS |awk -F',' '{print $2}'`
+                THIRD_SQL_ID=`echo $TOP_SQL_IDS_BY_WAIT_EVENTS |awk -F',' '{print $3}'`
+
+                if [[ -n "${FIRST_SQL_ID}" ]]
+                then
+                    echo -e "===> ${GREEN}FIRST_SQL_ID FOR PDB $PDB IN ${db}${ENDCOLOR}"
+                    echo -e "===> ${GREEN}${FIRST_SQL_ID}${ENDCOLOR}"
+                fi
+
+                if [[ -n "${SECOND_SQL_ID}" ]]
+                then
+                    echo -e "===>${GREEN} SECOND_SQL_ID FOR PDB $PDB IN ${db}${ENDCOLOR}"
+                    echo -e "===>${GREEN}${SECOND_SQL_ID}${ENDCOLOR}"
+                fi
+
+                if [[ -n "${THIRD_SQL_ID}" ]]
+                then
+                    echo -e "===>${GREEN} THIRD_SQL_ID FOR PDB $PDB IN ${db}${ENDCOLOR}"
+                    echo -e "===>${GREEN}${THIRD_SQL_ID}${ENDCOLOR}"
+                fi
+            fi
+            echo -e ""
+            echo -e ""
+        done
+    fi
+
+
+
+
+
+
+
+
+
 
 
 
@@ -207,14 +408,14 @@ EOF
 )
 
 
-
+    echo -e "===>${GREEN} DB CHECKS FOR IN ${db}${ENDCOLOR}"
     if [[ -z $TABLESPACE_OUTPUT ]]
     then
         echo -e "===>${GREEN} TABLESPACE_SIZE_CHECKS : PASS, NO TBSPs OVER ${TBSP_PERCENT_USED}% ${ENDCOLOR}"
     else
         echo -e "${RED}$TABLESPACE_OUTPUT${ENDCOLOR}"|sed 's/ //'
         TBSP_ECHOED_MESSAGE=`echo ${RED}$TABLESPACE_OUTPUT${ENDCOLOR}|sed 's/ //'`
-        echo -e "$TBSP_ECHOED_MESSAGE" | mail -s "${db} TABLESPACE_SIZE_CHECKS : DANGER, OVER ${TBSP_PERCENT_USED}% USED" oracleoem@cadencehealth.org,zainuddin.syed@nm.org
+        echo -e "$TBSP_ECHOED_MESSAGE" | mail -s "${db} TABLESPACE_SIZE_CHECKS : DANGER, OVER ${TBSP_PERCENT_USED}% USED" zsyed@deltadentalmi.com
     fi
 
 
@@ -229,7 +430,7 @@ EOF
     if [[ $FRA_SPACE_USAGE_PERCENT -ge $FRA_PERCENT_USED ]]
     then
         echo -e "===>${RED} FRA_SPACE_CHECK : DANGER, OVER ${FRA_PERCENT_USED}% USED ${ENDCOLOR}"
-        echo "===>${RED} FRA_SPACE_CHECK : DANGER, OVER ${FRA_PERCENT_USED}% USED ${ENDCOLOR}" | mail -s "${db} FRA_SPACE_CHECK : DANGER, OVER ${FRA_PERCENT_USED}% USED" oracleoem@cadencehealth.org,zainuddin.syed@nm.org
+        echo "===>${RED} FRA_SPACE_CHECK : DANGER, OVER ${FRA_PERCENT_USED}% USED ${ENDCOLOR}" | mail -s "${db} FRA_SPACE_CHECK : DANGER, OVER ${FRA_PERCENT_USED}% USED" zsyed@deltadentalmi.com
     else
         echo -e "===>${GREEN} FRA_SPACE_CHECK : PASS, FRA IS ${FRA_PERCENT_USED}% ${ENDCOLOR}"
     fi
