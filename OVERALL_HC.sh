@@ -35,7 +35,7 @@ EOF
     else
         echo -e "${RED}$ASM_DSKGRP_USAGE${ENDCOLOR}"|sed 's/ //'
         ASM_ECHOED_MESSAGE=`echo ${RED}$ASM_DSKGRP_USAGE${ENDCOLOR}|sed 's/ //'`
-        echo -e "$ASM_ECHOED_MESSAGE" | mail -s "ASM ON ${HOST_NAME} ASM_DISKGROUP : DANGER, OVER ${ASM_PERCENT_USED}% USED" zsyed@deltadentalmi.com
+        echo -e "$ASM_ECHOED_MESSAGE" | mail -s "ASM ON ${HOST_NAME} ASM_DISKGROUP : DANGER, OVER ${ASM_PERCENT_USED}% USED" 
     fi
 
 fi
@@ -233,7 +233,7 @@ EOF
                 echo -e "===>${RED} TABLESPACE_SIZE_CHECKS FOR PDB $PDB IN ${db} : FAILED, TBSPs OVER ${TBSP_PERCENT_USED}% ${ENDCOLOR}"
                 echo -e "${RED}$TABLESPACE_OUTPUT${ENDCOLOR}"|sed 's/ //'
                 TBSP_ECHOED_MESSAGE=`echo ${RED}$TABLESPACE_OUTPUT${ENDCOLOR}|sed 's/ //'`
-                echo -e "$TBSP_ECHOED_MESSAGE FOR PDB $PDB" | mail -s "PDB $PDB IN ${db} TABLESPACE_SIZE_CHECKS : DANGER, OVER ${TBSP_PERCENT_USED}% USED" zsyed@deltadentalmi.com
+                echo -e "$TBSP_ECHOED_MESSAGE FOR PDB $PDB" | mail -s "PDB $PDB IN ${db} TABLESPACE_SIZE_CHECKS : DANGER, OVER ${TBSP_PERCENT_USED}% USED" 
             fi
 
 
@@ -248,7 +248,7 @@ EOF
             if [[ $FRA_SPACE_USAGE_PERCENT -ge $FRA_PERCENT_USED ]]
             then
                 echo -e "===>${RED} FRA_SPACE_CHECK FOR PDB $PDB IN ${db} : DANGER, OVER ${FRA_PERCENT_USED}% USED ${ENDCOLOR}"
-                echo "===>${RED} FRA_SPACE_CHECK FOR PDB $PDB IN ${db} : DANGER, OVER ${FRA_PERCENT_USED}% USED ${ENDCOLOR}" | mail -s "${db} FRA_SPACE_CHECK : DANGER, OVER ${FRA_PERCENT_USED}% USED" zsyed@deltadentalmi.com
+                echo "===>${RED} FRA_SPACE_CHECK FOR PDB $PDB IN ${db} : DANGER, OVER ${FRA_PERCENT_USED}% USED ${ENDCOLOR}" | mail -s "${db} FRA_SPACE_CHECK : DANGER, OVER ${FRA_PERCENT_USED}% USED" 
             else
                 echo -e "===>${GREEN} FRA_SPACE_CHECK FOR PDB $PDB IN ${db} : PASS, FRA IS ${FRA_PERCENT_USED}% ${ENDCOLOR}"
             fi
@@ -415,7 +415,7 @@ EOF
     else
         echo -e "${RED}$TABLESPACE_OUTPUT${ENDCOLOR}"|sed 's/ //'
         TBSP_ECHOED_MESSAGE=`echo ${RED}$TABLESPACE_OUTPUT${ENDCOLOR}|sed 's/ //'`
-        echo -e "$TBSP_ECHOED_MESSAGE" | mail -s "${db} TABLESPACE_SIZE_CHECKS : DANGER, OVER ${TBSP_PERCENT_USED}% USED" zsyed@deltadentalmi.com
+        echo -e "$TBSP_ECHOED_MESSAGE" | mail -s "${db} TABLESPACE_SIZE_CHECKS : DANGER, OVER ${TBSP_PERCENT_USED}% USED" 
     fi
 
 
@@ -430,7 +430,7 @@ EOF
     if [[ $FRA_SPACE_USAGE_PERCENT -ge $FRA_PERCENT_USED ]]
     then
         echo -e "===>${RED} FRA_SPACE_CHECK : DANGER, OVER ${FRA_PERCENT_USED}% USED ${ENDCOLOR}"
-        echo "===>${RED} FRA_SPACE_CHECK : DANGER, OVER ${FRA_PERCENT_USED}% USED ${ENDCOLOR}" | mail -s "${db} FRA_SPACE_CHECK : DANGER, OVER ${FRA_PERCENT_USED}% USED" zsyed@deltadentalmi.com
+        echo "===>${RED} FRA_SPACE_CHECK : DANGER, OVER ${FRA_PERCENT_USED}% USED ${ENDCOLOR}" | mail -s "${db} FRA_SPACE_CHECK : DANGER, OVER ${FRA_PERCENT_USED}% USED" 
     else
         echo -e "===>${GREEN} FRA_SPACE_CHECK : PASS, FRA IS ${FRA_PERCENT_USED}% ${ENDCOLOR}"
     fi
