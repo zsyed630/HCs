@@ -1,0 +1,59 @@
+DECLARE
+CURSOR print_objects_frag_sql IS
+select owner,segment_name,segment_type from dba_segments where owner = 'GIS_USER' and segment_name in ('GWW_ERROR_TRACKER','GWW_ERROR_TRANS_REPORT') and segment_type = 'TABLE';
+print_objects_frag_sql_cur print_objects_frag_sql%ROWTYPE;
+BEGIN
+     OPEN print_objects_frag_sql;
+     LOOP
+        FETCH print_objects_frag_sql INTO print_objects_frag_sql_cur;
+        exit WHEN print_objects_frag_sql%NOTFOUND;
+		dbms_output.Put_line('declare');
+dbms_output.Put_line('v_freespace1_bytes number;');
+dbms_output.Put_line('v_freespace2_bytes number;');
+dbms_output.Put_line('v_freespace3_bytes number;');
+dbms_output.Put_line('v_freespace4_bytes number;');
+dbms_output.Put_line('v_freespace1_blocks number;');
+dbms_output.Put_line('v_freespace2_blocks number;');
+dbms_output.Put_line('v_freespace3_blocks number;');
+dbms_output.Put_line('v_freespace4_blocks number;');
+dbms_output.Put_line('v_full_bytes number;');
+dbms_output.Put_line('v_full_blocks number;');
+dbms_output.Put_line('v_unformatted_bytes number;');
+dbms_output.Put_line('v_unformatted_blocks number;');
+dbms_output.Put_line('BEGIN');
+dbms_output.Put_line('dbms_space.space_usage(');
+dbms_output.Put_line('segment_owner   => '||chr(39)||print_objects_frag_sql_cur.owner||chr(39)||',');
+dbms_output.Put_line('segment_name    => '||chr(39)||print_objects_frag_sql_cur.segment_name||chr(39)||',');
+dbms_output.Put_line('segment_type    => '||chr(39)||print_objects_frag_sql_cur.segment_type||chr(39)||',');
+dbms_output.Put_line('fs1_bytes               => v_freespace1_bytes,');
+dbms_output.Put_line('fs1_blocks              => v_freespace1_blocks,');
+dbms_output.Put_line('fs2_bytes               => v_freespace2_bytes,');
+dbms_output.Put_line('fs2_blocks              => v_freespace2_blocks,');
+dbms_output.Put_line('fs3_bytes               => V_freespace3_bytes,');
+dbms_output.Put_line('fs3_blocks              => v_freespace3_blocks,');
+dbms_output.Put_line('fs4_bytes               => v_freespace4_bytes,');
+dbms_output.Put_line('fs4_blocks              => v_freespace4_blocks,');
+dbms_output.Put_line('full_bytes              => v_full_bytes,');
+dbms_output.Put_line('full_blocks     => v_full_blocks,');
+dbms_output.Put_line('unformatted_blocks => v_unformatted_blocks,');
+dbms_output.Put_line('unformatted_bytes => v_unformatted_bytes);');
+dbms_output.Put_line('dbms_output.put_line('||chr(39)||chr(39)||');');
+dbms_output.Put_line('dbms_output.put_line('||chr(39)||'###############################################'||chr(39)||');');
+dbms_output.Put_line('dbms_output.put_line('||chr(39)||'Report: Free space below the High-Water Mark'||chr(39)||');');
+dbms_output.Put_line('dbms_output.put_line('||chr(39)||'###############################################'||chr(39)||');');
+dbms_output.Put_line('dbms_output.put_line('||chr(39)||'Blocks with Free Space (0-25%)  = '||chr(39)||'||v_freespace1_blocks);');
+dbms_output.Put_line('dbms_output.put_line('||chr(39)||'Blocks with Free Space (25-50%) = '||chr(39)||'||v_freespace2_blocks);');
+dbms_output.Put_line('dbms_output.put_line('||chr(39)||'Blocks with Free Space (50-75%) = '||chr(39)||'||v_freespace3_blocks);');
+dbms_output.Put_line('dbms_output.put_line('||chr(39)||'Blocks with Free Space (75-100%)= '||chr(39)||'||v_freespace4_blocks);');
+dbms_output.Put_line('dbms_output.put_line('||chr(39)||'Number of Full blocks           = '||chr(39)||'||v_full_blocks);');
+dbms_output.Put_line('dbms_output.put_line('||chr(39)||'###############################################'||chr(39)||');');
+dbms_output.Put_line('end;');
+dbms_output.Put_line('/');
+dbms_output.Put_line('');
+dbms_output.Put_line('');
+dbms_output.Put_line('');
+dbms_output.Put_line('');
+     END LOOP;
+     CLOSE print_objects_frag_sql;
+END;
+/
