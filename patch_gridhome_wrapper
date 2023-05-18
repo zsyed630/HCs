@@ -1,0 +1,96 @@
+#!/bin/bash
+
+SCR_DIR=/oracle/stagenfs/scripts/shell/patch
+LOG_DIR=/oracle/stagenfs/scripts/logs/patch
+DATETIME=`date +%Y%m%d`
+HOSTNAME=`hostname -s`
+mkdir -p $LOG_DIR/$HOSTNAME
+
+# Set env
+GRID_HOME=`grep +ASM /etc/oratab | cut -d: -f2`
+GROUP_FILE=$1
+PATCH_TYPE=$2
+
+# Verify usage
+if [[ $GROUP_FILE = '' || $PATCH_TYPE = '' ]]
+then
+  echo "Usage: gridhome_patch_wrapper.sh <FULL_PATH_TO_GROUP_FILE> <PATCH_TYPE>"
+  exit 1
+fi
+
+# Make sure group file is valid
+if [[ ! -s $GROUP_FILE ]]
+then
+  echo "Please specify a valid group file with the list of hosts to run this against."
+  exit 1
+fi
+
+# Make sure patch_type is valid
+if [[ $PATCH_TYPE = '' ]]
+then
+  echo "Please specify patch type to be used. Valid values are SAP or BOLTON"
+  exit 1
+elif [[ $PATCH_TYPE != 'SAP' && $PATCH_TYPE != 'BOLTON' ]]
+then
+  echo "Please specify valid patch type to be used. Valid values are SAP or BOLTON"
+  exit 1
+fi
+
+echo ""
+echo "This will start patching $GRID_HOME on the below nodes. "
+echo ""
+cat $GROUP_FILE
+echo ""
+echo -n "Please enter 'yes' if you want to proceed... "
+read USER_INPUT
+if [[ $USER_INPUT != 'yes' ]]
+then
+   echo ""
+   echo "User cancelled. Exiting the script."
+   exit 1
+fi
+
+echo ""
+echo "Starting patching of $GRID_HOME on the above nodes using Exadata dcli. This will take a while."
+echo "Please be patient... Log files are generated in $LOG_DIR."
+dcli -l oracle -g $GROUP_FILE "$SCR_DIR/patch_gridhome.sh $PATCH_TYPE > $LOG_DIR/\`hostname -s\`/grid_patch_summary_$DATETIME.log"
+
+# Check status
+echo ""
+echo "Below are the results of the patch installation. Please validate:"
+echo "------------------------------------------------------------------"
+echo ""
+echo "Hostname" | awk '{printf "%-20s",$0}'
+echo "Proactive Patch" | awk '{printf "%-20s",$0}'
+echo "OCW Patch" | awk '{printf "%-20s",$0}'
+
+# if SAP, check for SBP
+if [[ $PATCH_TYPE = 'SAP' ]]
+then
+  echo "SBP Patch" | awk '{printf "%-20s",$0}'
+fi
+
+echo ""
+echo "---------" | awk '{printf "%-20s",$0}'
+echo "---------------" | awk '{printf "%-20s",$0}'
+echo "---------" | awk '{printf "%-20s",$0}'
+
+# if SAP, check for SBP
+if [[ $PATCH_TYPE = 'SAP' ]]
+then
+  echo "---------" | awk '{printf "%-20s",$0}'
+fi
+echo ""
+
+for HOSTNAME in `cat $GROUP_FILE`
+do
+  echo "$HOSTNAME" | awk '{printf "%-20s",$0}'
+  echo $(grep "Proactive Bundled Patch exists" $LOG_DIR/$HOSTNAME/grid_patch_summary_$DATETIME.log | awk '{print $NF}') | awk '{printf "%-20s",$0}'        
+  echo $(grep "OCW Patch exists" $LOG_DIR/$HOSTNAME/grid_patch_summary_$DATETIME.log | awk '{print $NF}') | awk '{printf "%-20s",$0}'
+  # if SAP, check for SBP
+  if [[ $PATCH_TYPE = 'SAP' ]]
+  then
+    echo $(grep "SAP Bundled Patch exists" $LOG_DIR/$HOSTNAME/grid_patch_summary_$DATETIME.log | awk '{print $NF}') | awk '{printf "%-20s",$0}'
+  fi
+  echo ""
+done
