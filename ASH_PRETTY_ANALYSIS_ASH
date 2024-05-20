@@ -42,7 +42,6 @@ BEGIN
 END;
 /
 
-  1* select 'alter system kill session '||chr(39)||sid||','||serial#||',@'||inst_id||chr(39)||' immediate;' from gv$session where sql_id in ('g5ymgqjqnkv19','8y71r999fv528')
 
 
 
