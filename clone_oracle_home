@@ -1,0 +1,162 @@
+## DO THIS EVERY NODE AS ORACLE
+==========================================-
+dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "du -sh /u01/app/oracle/product/19.0.0.0/dbhome_2"
+dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "cp -Rp /u01/app/oracle/product/19.0.0.0/dbhome_2 /u01/app/oracle/product/19.0.0.0/dbhome_3"
+dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "du -sh /u01/app/oracle/product/19.0.0.0/dbhome_3"
+dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "rm /u01/app/oracle/product/19.0.0.0/dbhome_3/network/admin/tnsnames.ora"
+dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "rm /u01/app/oracle/product/19.0.0.0/dbhome_3/network/admin/sqlnet.ora"
+dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "ln -s /oracle/stagenfs/tnsnames/qa04/tnsnames.ora /u01/app/oracle/product/19.0.0.0/dbhome_3/network/admin/tnsnames.ora"
+dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "ln -s /oracle/stagenfs/tnsnames/qa04/tnsnames.ora /u01/app/oracle/product/19.0.0.0/dbhome_3/network/admin/tnsnames.ora"
+dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "ls -ltrh /u01/app/oracle/product/19.0.0.0/dbhome_3/network/admin"             
+dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "cp /u01/app/oracle/product/19.0.0.0/dbhome_2/network/admin/sqlnet.ora /u01/app/oracle/product/19.0.0.0/dbhome_3/network/admin" 
+
+
+/u01/app/oracle/product/19.0.0.0/dbhome_3/perl/bin/perl /u01/app/oracle/product/19.0.0.0/dbhome_3/clone/bin/clone.pl -silent "LOCAL_NODE=pr04db01" "CLUSTER_NODES={pr04db01,pr04db02,pr04db03,pr04db04,pr04db05,pr04db06,pr04db07,pr04db08,}" ORACLE_BASE=/u01/app/oracle ORACLE_HOME=/u01/app/oracle/product/19.0.0.0/dbhome_3 ORACLE_HOME_NAME=OraDB19HomeSAP3"
+
+/u01/app/oracle/product/19.0.0.0/dbhome_7/perl/bin/perl /u01/app/oracle/product/19.0.0.0/dbhome_7/clone/bin/clone.pl -silent "LOCAL_NODE=`hostname -s`" "CLUSTER_NODES={pr03db61,pr03db62,pr03db63,pr03db64,pr03db65,pr03db66}" ORACLE_BASE=/u01/app/oracle ORACLE_HOME=/u01/app/oracle/product/19.0.0.0/dbhome_7 ORACLE_HOME_NAME=OraDB19Home7 > /oracle/stagenfs/scripts/logs/clonehome_`hostname -s`.log &
+
+# DO THIS AS ROOT EVERY NODE
+sudo /u01/app/oracle/product/19.0.0.0/dbhome_3/root.sh
+sudo chown root:oinstall /u01/app/oracle/product/19.0.0.0/dbhome_3/bin/oradism
+sudo chmod u+s /u01/app/oracle/product/19.0.0.0/dbhome_3/bin/oradism
+sudo ls -ltrh /u01/app/oracle/product/19.0.0.0/dbhome_3/bin/oradism
+
+
+/u01/app/oracle/product/12.1.0.2/dbhome_2/perl/bin/perl /u01/app/oracle/product/12.1.0.2/dbhome_2/clone/bin/clone.pl "LOCAL_NODE=`hostname`" "CLUSTER_NODES={pr04db26,pr04db27,pr04db28}" ORACLE_BASE=/u01/app/oracle ORACLE_HOME=/u01/app/oracle/product/12.1.0.2/dbhome_2 ORACLE_HOME_NAME=OraDB12Home2
+
+/u01/app/oracle/product/12.2.0.1/dbhome_2/perl/bin/perl /u01/app/oracle/product/12.2.0.1/dbhome_2/clone/bin/clone.pl "LOCAL_NODE=`hostname`" "CLUSTER_NODES={pr04db26,pr04db27,pr04db28}" ORACLE_BASE=/u01/app/oracle ORACLE_HOME=/u01/app/oracle/product/12.2.0.1/dbhome_2 ORACLE_HOME_NAME=OraDB122Home2
+
+/u01/app/oracle/product/19.0.0.0/dbhome_3/perl/bin/perl /u01/app/oracle/product/19.0.0.0/dbhome_3/clone/bin/clone.pl "LOCAL_NODE=`hostname`" "CLUSTER_NODES={pr04db26,pr04db27,pr04db28}" ORACLE_BASE=/u01/app/oracle ORACLE_HOME=/u01/app/oracle/product/19.0.0.0/dbhome_3 ORACLE_HOME_NAME=OraDB19Home3
+
+
+
+dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "/u01/app/oracle/product/12.1.0.2/dbhome_2/perl/bin/perl /u01/app/oracle/product/12.1.0.2/dbhome_2/clone/bin/clone.pl "LOCAL_NODE=`hostname`" "CLUSTER_NODES={pr04db26,pr04db27,pr04db28}" ORACLE_BASE=/u01/app/oracle ORACLE_HOME=/u01/app/oracle/product/12.1.0.2/dbhome_2 ORACLE_HOME_NAME=OraDB12Home2"
+
+/u01/app/oracle/product/18.0.0.0/dbhome_1/perl/bin/perl /u01/app/oracle/product/18.0.0.0/dbhome_1/clone/bin/clone.pl "LOCAL_NODE=`hostname`" "CLUSTER_NODES={qa04db26,qa04db27,qa04db28}" ORACLE_BASE=/u01/app/oracle ORACLE_HOME=/u01/app/oracle/product/18.0.0.0/dbhome_1 ORACLE_HOME_NAME=OraDB18Home1
+
+/u01/app/oracle/product/12.2.0.1/dbhome_2/root.sh
+/u01/app/oracle/product/12.1.0.2/dbhome_2/root.sh
+/u01/app/oracle/product/19.0.0.0/dbhome_3/root.sh
+chown root:oinstall /u01/app/oracle/product/19.0.0.0/dbhome_3/bin/oradism
+chmod u+s /u01/app/oracle/product/19.0.0.0/dbhome_3/bin/oradism
+ls -ltrh /u01/app/oracle/product/19.0.0.0/dbhome_3/bin/oradism
+
+
+  974  2021-08-12.10:19:44 dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "ls -ltrh /u01/app/oracle/product/19.0.0.0/"
+  975  2021-08-12.10:20:34 dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "scp -r oracle@pr04db09:/tmp/dbhome_3 /u01/app/oracle/product/19.0.0.0"
+  976  2021-08-12.10:39:33 dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "du -sh /u01/app/oracle/product/19.0.0.0/dbhome_3"
+  977  2021-08-12.10:40:30 dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "ln -s /oracle/stagenfs/tnsnames/qa04c/tnsnames.ora /u01/app/oracle/product/12.1.0.2/dbhome_2/network/admin/tnsnames.ora"
+  978  2021-08-12.10:40:43 dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "rm /u01/app/oracle/product/1*.*.0.*/dbhome_*/network/admin/tnsnames.ora"
+  979  2021-08-12.10:40:46 dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "ln -s /oracle/stagenfs/tnsnames/pr03b/tnsnames.ora /u01/app/oracle/product/19.0.0.0/dbhome_3/network/admin/tnsnames.ora"
+  980  2021-08-12.10:40:54 dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "ls -ltrh /u01/app/oracle/product/19.0.0.0/dbhome_3/network/admin/tnsnames.ora"
+  983  2021-08-12.10:43:10 dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "scp -r oracle@pr03db07:/u01/app/oracle/product/12.1.0.2/dbhome_1/network/admin/PGCOM /u01/app/oracle/product/19.0.0.0/dbhome_3/network/admin"
+  984  2021-08-12.10:43:22 dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "ls -ltrh /u01/app/oracle/product/19.0.0.0/dbhome_3/network/admin"
+  985  2021-08-12.10:43:29 dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "ls -ltrh /u01/app/oracle/product/19.0.0.0/dbhome_3/network/admin/PGCOM"
+  986  2021-08-12.10:43:45 dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "ls -ltrh /u01/app/oracle/product/12.1.0.2/dbhome/network/admin/PGCOM"
+  987  2021-08-12.10:44:26 dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "rm /u01/app/oracle/product/19.0.0.0/dbhome_3/network/admin/PGCOM/*"
+  988  2021-08-12.10:44:34 dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "ls -ltrh /u01/app/oracle/product/12.1.0.2/dbhome/network/admin/PGCOM"
+  989  2021-08-12.10:44:40 dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "ls -ltrh /u01/app/oracle/product/19.0.0.0/dbhome_3/network/admin/PGCOM"
+  990  2021-08-12.10:45:08 dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "ln -s /oracle/stagenfs/sqlnet/PGCOM/sqlnet.ora /u01/app/oracle/product/19.0.0.0/dbhome_3/network/admin/PGCOM/"
+  991  2021-08-12.10:45:20 dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "ln -s /oracle/stagenfs/tnsnames/pr03b/tnsnames.ora /u01/app/oracle/product/19.0.0.0/dbhome_3/network/admin/PGCOM/"
+  992  2021-08-12.10:45:24 dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "ls -ltrh /u01/app/oracle/product/19.0.0.0/dbhome_3/network/admin/PGCOM"
+  998  2021-08-12.10:52:18 dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "/oracle/stagenfs/scripts/shell/patch/register_dbhome.ksh"
+ 1002  2021-08-12.10:56:58 history|grep dcli
+[oracle@pr04db09: ~]$
+
+
+
+
+
+
+
+
+
+==================================================
+
+APRIL 2021 DIRECTORY  N PATCH
+================================================================================
+export IHRDBMS=/u01/app/oracle/product/19.0.0.0/dbhome_3
+mv $IHRDBMS/OPatch $IHRDBMS/OPatch-pre-SBP_191100210420_202105
+unzip -qd $IHRDBMS /oracle/stagenfs/patches/19c/Apr2021/SAP/OPATCH19P_2105-70004543.ZIP -x SIGNATURE.SMF
+unzip -qd $IHRDBMS/sapbundle /oracle/stagenfs/patches/19c/Apr2021/SAP/SXD19V2P_2105-70004543.ZIP 'SBP_191100210420_202105/MOPatch/*'
+test -d $IHRDBMS/MOPatch && mv $IHRDBMS/MOPatch $IHRDBMS/MOPatch-pre-SBP_191100210420_202105
+mv $IHRDBMS/sapbundle/SBP_191100210420_202105/MOPatch $IHRDBMS/MOPatch
+env ORACLE_HOME=$IHRDBMS $IHRDBMS/MOPatch/mopatch.sh -v -s /oracle/stagenfs/patches/19c/Apr2021/SAP/SXD19V2P_2105-70004543.ZIP
+
+Execute One Off
+
+export ORACLE_HOME=/u01/app/oracle/product/19.0.0.0/dbhome_3
+
+/oracle/stagenfs/patches/19c/oneoff/RDBMS/Apr2021/SAP
+
+
+
+
+
+
+export IHRDBMS=/u01/app/oracle/product/19.0.0.0/dbhome_3
+mv $IHRDBMS/OPatch $IHRDBMS/OPatch-pre-SBP_191000210119_202102
+unzip -qd $IHRDBMS /oracle/stagenfs/patches/19c/Feb2021/SAP/OPATCH19P_2102-70004543.ZIP -x SIGNATURE.SMF
+unzip -qd $IHRDBMS/sapbundle /oracle/stagenfs/patches/19c/Feb2021/SAP/SXD19P_2102-70004543.ZIP 'SBP_191000210119_202102/MOPatch/*'
+test -d $IHRDBMS/MOPatch && mv $IHRDBMS/MOPatch $IHRDBMS/MOPatch-pre-SBP_191000210119_202102
+mv $IHRDBMS/sapbundle/SBP_191000210119_202102/MOPatch $IHRDBMS/MOPatch
+env ORACLE_HOME=$IHRDBMS $IHRDBMS/MOPatch/mopatch.sh -v -s /oracle/stagenfs/patches/19c/Feb2021/SAP/SXD19P_2102-70004543.ZIP
+
+
+export IHRDBMS=/u01/app/oracle/product/19.0.0.0/dbhome_3
+mv $IHRDBMS/OPatch $IHRDBMS/OPatch-pre-SBP_191100210420_202105
+unzip -qd $IHRDBMS /oracle/stagenfs/patches/19c/Apr2021/SAP/OPATCH19P_2105-70004543.ZIP -x SIGNATURE.SMF
+unzip -qd $IHRDBMS/sapbundle /oracle/stagenfs/patches/19c/Apr2021/SAP/SXD19V2P_2105-70004543.ZIP 'SBP_191100210420_202105/MOPatch/*'
+test -d $IHRDBMS/MOPatch && mv $IHRDBMS/MOPatch $IHRDBMS/MOPatch-pre-SBP_191100210420_202105
+mv $IHRDBMS/sapbundle/SBP_191100210420_202105/MOPatch $IHRDBMS/MOPatch
+env ORACLE_HOME=$IHRDBMS $IHRDBMS/MOPatch/mopatch.sh -v -s /oracle/stagenfs/patches/19c/Apr2021/SAP/SXD19V2P_2105-70004543.ZIP
+
+
+export OHGRID=/u01/app/19.0.0.0/grid
+mv $OHGRID/OPatch $OHGRID/OPatch-pre-SBP_191000210119_202102
+unzip -qd $OHGRID /oracle/stagenfs/patches/SAP/19c/Feb2021/OPATCH19P_2102-70004543.ZIP -x SIGNATURE.SMF
+unzip -qd $OHGRID/sapbundle /oracle/stagenfs/patches/SAP/19c/Feb2021/SXD19P_2102-70004543.ZIP 'SBP_191000210119_202102/MOPatch/*'
+test -d $OHGRID/MOPatch && mv $OHGRID/MOPatch $OHGRID/MOPatch-pre-SBP_191000210119_202102
+mv $OHGRID/sapbundle/SBP_191000210119_202102/MOPatch $OHGRID/MOPatch
+env ORACLE_HOME=$OHGRID $OHGRID/MOPatch/mopatch.sh -v -s /oracle/stagenfs/patches/SAP/19c/Feb2021/SXD19P_2102-70004543.ZIP
+
+
+export OHGRID=/u01/app/18.0.0.0/grid
+mv $OHGRID/OPatch $OHGRID/OPatch-pre-SBP_181400210420_202105
+unzip -qd $OHGRID /oracle/stagenfs/patches/SAP/18c/April2021/OPATCH18P_2105-70003941.ZIP -x SIGNATURE.SMF
+unzip -qd $OHGRID/sapbundle /oracle/stagenfs/patches/SAP/18c/April2021/SXD18P_2105-70003941.ZIP 'SBP_181400210420_202105/MOPatch/*'
+test -d $OHGRID/MOPatch && mv $OHGRID/MOPatch $OHGRID/MOPatch-pre-SBP_181400210420_202105
+mv $OHGRID/sapbundle/SBP_181400210420_202105/MOPatch $OHGRID/MOPatch
+env ORACLE_HOME=$OHGRID $OHGRID/MOPatch/mopatch.sh -v -s /oracle/stagenfs/patches/SAP/18c/April2021/SXD18P_2105-70003941.ZIP
+
+
+dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "/u01/app/19.0.0.0/grid/OPatch/opatch lspatches -oh /u01/app/19.0.0.0/grid| grep -i "19.10.0.0"|wc -l"
+pr03db01: 3
+pr03db02: 3
+pr03db03: 3
+pr03db04: 3
+pr03db05: 3
+pr03db06: 3
+
+
+dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "/u01/app/19.0.0.0/grid/OPatch/opatch lspatches -oh /u01/app/oracle/product/19.0.0.0/dbhome_2| grep -i "19.10.0"|wc -l"
+pr03db01: 5
+pr03db02: 5
+pr03db03: 5
+pr03db04: 5
+pr03db05: 5
+pr03db06: 5
+
+
+dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "ls -ltrh /u01/app/oracle/product/19.0.0.0/dbhome_2/bin/oradism"
+
+dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "ls -ltrh /u01/app/oracle/product/19.0.0.0/dbhome_2/network/admin"   
+dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "cat /u01/app/oracle/product/19.0.0.0/dbhome_2/network/admin/sqlnet.ora"
+
+
+
+
+DO NOT EXECUTE
+##dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "rm /u01/app/oracle/product/19.0.0.0/dbhome"
+##dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "ln -s /u01/app/oracle/product/19.0.0.0/dbhome_2 /u01/app/oracle/product/19.0.0.0/dbhome"
+dcli -g /opt/oracle.SupportTools/onecommand/dbs_group -l oracle "ls -ltrh /u01/app/oracle/product/19.0.0.0/"   
