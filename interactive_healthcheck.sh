@@ -691,33 +691,47 @@ EOF
         echo ""
         echo -e "===>${CYAN} PRIMARY : STANDBY DESTINATION STATUS${ENDCOLOR}"
         $ORACLE_HOME/bin/sqlplus -s / as sysdba <<EOF
-        set heading on feedback off pagesize 100 linesize 160 trimout on trimspool on
-        column dest_name  format a30 heading 'DESTINATION'
-        column status     format a12 heading 'STATUS'
-        column gap_status format a12 heading 'GAP'
-        column error      format a40 heading 'ERROR'
-        select dest_name, status,
-               nvl(to_char(gap_status),'NONE') gap_status,
-               nvl(error,'NONE') error
-        from v\$archive_dest_status
-        where target='STANDBY' and status <> 'INACTIVE';
+        set heading on feedback off pagesize 100 linesize 200 trimout on trimspool on
+        column dest_name   format a35 heading 'DESTINATION'
+        column status      format a12 heading 'STATUS'
+        column db_unique   format a20 heading 'STANDBY_DB'
+        column gap_status  format a15 heading 'GAP_STATUS'
+        column error       format a40 heading 'ERROR'
+        select d.dest_name,
+               d.status,
+               nvl(d.db_unique_name,'N/A')          db_unique,
+               nvl(to_char(s.gap_status),'NONE')    gap_status,
+               nvl(d.error,'NONE')                  error
+        from v\$archive_dest d, v\$archive_dest_status s
+        where d.dest_id = s.dest_id
+        and d.target = 'STANDBY'
+        and d.status <> 'INACTIVE'
+        order by d.dest_id;
         exit
 EOF
 
         echo ""
         echo -e "===>${CYAN} PRIMARY : ARCHIVE LOG TRANSPORT - LAST 5 PER THREAD${ENDCOLOR}"
         $ORACLE_HOME/bin/sqlplus -s / as sysdba <<EOF
-        set heading on feedback off pagesize 100 linesize 120 trimout on trimspool on
-        column thread#        format 99    heading 'THR'
-        column last_archived  format 999999 heading 'LAST_ARCHIVED'
-        column last_applied   format 999999 heading 'LAST_APPLIED'
-        select thread#,
-               max(sequence#) last_archived,
-               nvl((select max(sequence#) from v\$archive_dest_status ads where ads.thread# = al.thread# and applied_seq# is not null),0) last_applied
-        from v\$archived_log al
-        where standby_dest='NO' and dest_id=1
-        group by thread#
-        order by thread#;
+        set heading on feedback off pagesize 100 linesize 160 trimout on trimspool on
+        column thr            format 99      heading 'THR'
+        column last_archived  format 999999  heading 'LAST_ARCHIVED'
+        column last_applied   format 999999  heading 'LAST_APPLIED'
+        column gap            format 999999  heading 'GAP'
+        select al.thread#                                                                 thr,
+               max(al.sequence#)                                                          last_archived,
+               nvl(max(s.applied_seq#),0)                                                last_applied,
+               max(al.sequence#) - nvl(max(s.applied_seq#),0)                           gap
+        from v\$archived_log al,
+             (select dest_id, max(applied_seq#) applied_seq#
+              from v\$archive_dest_status
+              where applied_seq# is not null
+              group by dest_id) s
+        where al.standby_dest = 'NO'
+        and al.dest_id = 1
+        and s.dest_id(+) between 1 and 10
+        group by al.thread#
+        order by al.thread#;
         exit
 EOF
 
