@@ -711,27 +711,48 @@ EOF
 EOF
 
         echo ""
-        echo -e "===>${CYAN} PRIMARY : ARCHIVE LOG TRANSPORT - LAST 5 PER THREAD${ENDCOLOR}"
+        echo -e "===>${CYAN} PRIMARY : ARCHIVE LOG TRANSPORT - SEQUENCE GAP PER THREAD${ENDCOLOR}"
         $ORACLE_HOME/bin/sqlplus -s / as sysdba <<EOF
-        set heading on feedback off pagesize 100 linesize 160 trimout on trimspool on
-        column thr            format 99      heading 'THR'
-        column last_archived  format 999999  heading 'LAST_ARCHIVED'
-        column last_applied   format 999999  heading 'LAST_APPLIED'
-        column gap            format 999999  heading 'GAP'
-        select al.thread#                                                                 thr,
-               max(al.sequence#)                                                          last_archived,
-               nvl(max(s.applied_seq#),0)                                                last_applied,
-               max(al.sequence#) - nvl(max(s.applied_seq#),0)                           gap
-        from v\$archived_log al,
-             (select dest_id, max(applied_seq#) applied_seq#
-              from v\$archive_dest_status
-              where applied_seq# is not null
-              group by dest_id) s
-        where al.standby_dest = 'NO'
-        and al.dest_id = 1
-        and s.dest_id(+) between 1 and 10
-        group by al.thread#
-        order by al.thread#;
+        set heading on feedback off pagesize 100 linesize 200 trimout on trimspool on
+        column thr            format 99       heading 'THR'
+        column last_archived  format 999999   heading 'LAST_ARCHIVED'
+        column last_shipped   format 999999   heading 'LAST_SHIPPED'
+        column last_applied   format 999999   heading 'LAST_APPLIED'
+        column ship_gap       format 999999   heading 'SHIP_GAP'
+        column apply_gap      format 999999   heading 'APPLY_GAP'
+        column status         format a12      heading 'STATUS'
+        select p.thread#                                                           thr,
+               p.last_archived,
+               nvl(sh.last_shipped, 0)                                            last_shipped,
+               nvl(ap.last_applied, 0)                                            last_applied,
+               p.last_archived - nvl(sh.last_shipped, 0)                          ship_gap,
+               p.last_archived - nvl(ap.last_applied, 0)                          apply_gap,
+               case
+                 when p.last_archived - nvl(ap.last_applied, 0) = 0 then 'IN SYNC'
+                 when p.last_archived - nvl(ap.last_applied, 0) <= 3 then 'MINOR LAG'
+                 else '*** BEHIND ***'
+               end                                                                 status
+        from
+          /*-- LAST ARCHIVED ON PRIMARY PER THREAD --*/
+          (select thread#, max(sequence#) last_archived
+           from v\$archived_log
+           where standby_dest = 'NO'
+           and dest_id = 1
+           group by thread#) p,
+          /*-- LAST SEQUENCE SHIPPED TO STANDBY PER THREAD --*/
+          (select thread#, max(sequence#) last_shipped
+           from v\$archived_log
+           where standby_dest = 'YES'
+           group by thread#) sh,
+          /*-- LAST SEQUENCE CONFIRMED APPLIED ON STANDBY PER THREAD --*/
+          (select thread#, max(sequence#) last_applied
+           from v\$archived_log
+           where standby_dest = 'YES'
+           and applied = 'YES'
+           group by thread#) ap
+        where p.thread# = sh.thread#(+)
+        and p.thread# = ap.thread#(+)
+        order by p.thread#;
         exit
 EOF
 
