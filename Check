@@ -1,0 +1,345 @@
+
+ORACLE DATABASE SECURITY ASSESSMENT
+Native Remediation Plan — No Additional Product Licensing
+
+Document Information	
+Organization	Grainger
+Database	Oracle 19c (non-Exadata)
+Assessment Tool	Oracle DBSAT (Database Security Assessment Tool)
+Assessment Date	March 10, 2026
+Constraint	No new Oracle product licenses. Native Oracle 19c EE fixes only.
+Network Encryption	ALREADY IMPLEMENTED — Native Network Encryption active (no action needed)
+
+CONFIDENTIAL – INTERNAL USE ONLY
+ 
+1. Executive Summary
+Oracle's DBSAT readout on March 10, 2026 identified significant security gaps across all five assessment categories for Grainger's Oracle 19c environment. This document is a revised remediation plan constrained to native Oracle 19c Enterprise Edition capabilities only — no additional product licenses (TDE, OKV, Database Vault, Data Masking Pack, AVDF, or Data Safe) are in scope.
+
+Three categories can be substantially or fully remediated at no cost using built-in Oracle features. One finding (data at rest encryption) has NO native fix — it requires the Advanced Security Option (ASO), which is a paid add-on. This residual risk must be formally accepted and documented.
+
+Network encryption (Native Network Encryption) is already implemented and requires no further action.
+
+1.1 Results Scorecard — Native Fix Assessment
+Category	Rating	Fixable with Native Oracle (No Cost)?	Key Gap
+Safeguard Data Privacy	RED	PARTIAL	Encryption at rest has NO free fix (needs ASO/TDE)
+Control Access to Data	RED	PARTIAL	DBA over-access partially fixable via VPD; masking needs custom scripts
+Manage User Accounts	RED	YES	All issues fixable via native password profiles
+Securely Configure Systems	YELLOW	YES	Patching + profile + component removal
+Monitor & Audit Activity	YELLOW	YES	All fixes via native Unified Auditing (free in 19c)
+
+Legend: YES = fully fixable natively | PARTIAL = partially fixable, residual risk remains | NO = no free fix exists, risk must be accepted
+ 
+2. Prioritized Action Plan
+All actions below use only features included in Oracle 19c Enterprise Edition. Items marked NO require a paid license and are flagged for risk acceptance rather than technical remediation.
+
+#	Remediation Action	Priority	Native Fix?	Approach
+1	Apply missing Unified Audit policies (6 gaps)	HIGH	YES	CREATE AUDIT POLICY statements
+2	Fix all user account/password profile issues	HIGH	YES	ALTER PROFILE / CREATE PROFILE
+3	Apply Oracle 19.29 RU patch	HIGH	YES	OPatch (requires support contract)
+4	Encrypt RMAN backups (password-based)	HIGH	YES	RMAN SET ENCRYPTION IDENTIFIED BY
+5	Remove / disable 6 unused DB components	MEDIUM	YES	DBMS_REGISTRY / deinstall scripts
+6	Restrict session & idle time via profiles	MEDIUM	YES	SESSIONS_PER_USER, IDLE_TIME
+7	Restrict DBA access to PII via VPD (DBMS_RLS)	MEDIUM	PARTIAL	VPD policies on sensitive tables
+8	Replace sub-prod PII with masked data (manual scripts)	MEDIUM	PARTIAL	Custom UPDATE/DBMS_CRYPTO scripts
+9	Encrypt data at rest (tablespaces & columns)	HIGH	NO	Requires ASO/TDE license - accept risk
+ 
+3. Detailed Findings & Remediation
+3.1 Safeguard Data Privacy — Rating: RED
+
+Finding A: Data in Transit — ALREADY RESOLVED
+Native Network Encryption is confirmed active. No further action required for this finding.
+
+Finding B: RMAN Backups Unencrypted — FIXABLE (Native, No License Required)
+All RMAN backup pieces are currently unencrypted. Password-based RMAN backup encryption is available in Oracle 19c at no additional cost and does NOT require the Advanced Security Option (TDE wallet-based encryption does require ASO, but password-based does not).
+
+✓	Enable RMAN password-based backup encryption:
+◦	RMAN> CONFIGURE ENCRYPTION FOR DATABASE ON;
+◦	RMAN> SET ENCRYPTION ON IDENTIFIED BY 'YourStrongPassphrase' ONLY;
+◦	Use ONLY keyword to enforce password-based encryption (no wallet required).
+◦	Store the encryption passphrase securely in your password vault. Without it, backups CANNOT be restored.
+◦	Verify: RMAN> LIST BACKUP; -- encrypted column should show 'YES'
+✓	Configure encryption for all future RMAN jobs:
+◦	RMAN> CONFIGURE ENCRYPTION ALGORITHM 'AES256';
+◦	AES256 is the strongest available and has no performance impact on modern hardware.
+✓	For existing unencrypted backups: re-take a full backup with encryption enabled. Old unencrypted backups should be expired and deleted per retention policy once the new encrypted set is validated.
+
+Finding C: Data at Rest Unencrypted (Tablespaces/Columns) — NO NATIVE FIX
+NO FREE FIX AVAILABLE: Transparent Data Encryption (TDE) and column-level encryption require Oracle Advanced Security Option (ASO), which is a paid add-on to Enterprise Edition. There is no native Oracle 19c EE mechanism to encrypt tablespaces or columns without ASO.
+⚠	This risk cannot be technically remediated without purchasing the Advanced Security Option.
+⚠	Recommended action: Formally document this as an accepted residual risk in your security risk register. Include: risk owner, business justification for non-remediation, compensating controls (access restriction, auditing, physical security), and planned review date.
+⚠	Compensating controls to partially reduce exposure (implement these regardless):
+◦	Restrict OS-level access to Oracle datafile directories via Unix file permissions (chmod 600 on datafiles, owned by oracle:dba).
+◦	Ensure ASM disk groups are not directly accessible to non-oracle OS accounts.
+◦	Confirm NNE is enforced so data cannot be intercepted in transit (already done).
+◦	Audit all SELECT operations on tables known to contain PII/PHI (see Section 3.5).
+ 
+3.2 Control Access to Data — Rating: RED
+
+Finding A: DBAs Have Access to PII/PHI — PARTIAL FIX via VPD
+Oracle Virtual Private Database (VPD), also known as Fine-Grained Access Control (FGAC), is included with Oracle Enterprise Edition at no extra cost. It allows row- and column-level security policies that can restrict DBA-level accounts from seeing sensitive data values (they see NULLs or masked output instead of real values).
+
+✓	Identify tables containing PII/PHI (cross-reference DBSAT Discoverer output or known application schema).
+✓	Create a VPD security policy function for each sensitive table:
+◦	CREATE OR REPLACE FUNCTION restrict_pii(schema IN VARCHAR2, tname IN VARCHAR2)
+◦	  RETURN VARCHAR2 AS BEGIN
+◦	  IF SYS_CONTEXT('USERENV','SESSION_USER') IN ('DBA_USER1','SYS','SYSTEM') THEN
+◦	    RETURN '1=0';  -- returns no rows for DBAs
+◦	  END IF; RETURN NULL; END;
+◦	/
+◦	EXEC DBMS_RLS.ADD_POLICY('HR','EMPLOYEES','RESTRICT_DBA_ACCESS',
+◦	  'HR','RESTRICT_PII', 'SELECT,UPDATE,DELETE', TRUE, TRUE);
+◦	Adapt the function logic to your specific access control requirements (role-based, time-based, etc.).
+◦	VPD policies survive DBA SELECT * attempts — the WHERE clause is injected at parse time.
+◦	Note: VPD does not protect against users with EXEMPT ACCESS POLICY privilege. Audit who holds this privilege.
+✓	Audit who has EXEMPT ACCESS POLICY:
+◦	SELECT grantee FROM dba_sys_privs WHERE privilege = 'EXEMPT ACCESS POLICY';
+
+RESIDUAL RISK: VPD restricts data visibility via SQL but does not prevent OS-level file access or DBA use of data export utilities when granted DATAPUMP_EXP_FULL_DATABASE. Compensate by auditing Data Pump exports and restricting OS datafile access (see 3.1).
+
+Finding B: PII/PHI in Sub-Production Environments — PARTIAL FIX (Manual Scripts)
+Oracle Data Masking Pack (DMS) is not available without purchase. However, masking can be performed manually using custom PL/SQL scripts. This requires more effort but achieves the same outcome.
+✓	After each sub-prod refresh, run a masking script. Example for common PII fields:
+◦	BEGIN
+◦	  UPDATE hr.employees SET
+◦	    first_name   = DBMS_RANDOM.STRING('U', 6),
+◦	    last_name    = DBMS_RANDOM.STRING('U', 8),
+◦	    email        = DBMS_RANDOM.STRING('L', 6) || '@test.invalid',
+◦	    phone_number = '555-' || LPAD(TRUNC(DBMS_RANDOM.VALUE(1000,9999)),4,'0'),
+◦	    salary       = ROUND(DBMS_RANDOM.VALUE(30000, 120000), -3);
+◦	  COMMIT;
+◦	END;
+◦	/
+◦	Extend this pattern to all tables identified as containing PII/PHI.
+◦	Use DBMS_CRYPTO for format-preserving masking of SSNs, card numbers, etc. where referential integrity must be maintained.
+✓	Build a masking runbook listing every table/column containing PII and the corresponding masking function. Run this runbook as the final step of every sub-prod refresh.
+✓	Restrict sub-prod database access to developers only (no external access, no PHI-related reporting queries).
+
+RESIDUAL RISK: Manual scripts require discipline and process enforcement. Unlike DMS, there is no automated lineage or audit trail of which columns were masked. Mitigate by documenting the masking runbook and including it in the sub-prod refresh checklist.
+ 
+3.3 Manage User Accounts — Rating: RED — FULLY FIXABLE
+All findings in this category are completely fixable using native Oracle password profiles and account management — no additional licensing required. This should be the highest priority remediation given the critical finding status.
+
+Step 1: Immediate Actions (Do Today)
+✓	Change default passwords for PEOPLE and PS immediately:
+◦	ALTER USER PEOPLE IDENTIFIED BY '<NewStrongPassword>' PASSWORD EXPIRE;
+◦	ALTER USER PS     IDENTIFIED BY '<NewStrongPassword>' PASSWORD EXPIRE;
+◦	Verify no other accounts have known default passwords: SELECT username, account_status FROM dba_users WHERE account_status = 'OPEN';
+✓	Lock or drop the 8 accounts that have never logged in:
+◦	-- Identify never-used accounts:
+◦	SELECT username, created, last_login FROM dba_users WHERE last_login IS NULL AND account_status = 'OPEN';
+◦	ALTER USER <username> ACCOUNT LOCK;  -- lock first, drop after confirming not needed
+✓	Force password reset for all accounts with legacy (10g) password hashes:
+◦	SELECT username, password_versions FROM dba_users WHERE password_versions LIKE '%10G%';
+◦	ALTER USER <username> IDENTIFIED BY '<NewPassword>' PASSWORD EXPIRE;
+
+Step 2: Create Strong Password Profiles
+✓	Create separate profiles for application accounts, DBA accounts, and service accounts:
+◦	CREATE PROFILE app_user_profile LIMIT
+◦	  PASSWORD_LIFE_TIME          90
+◦	  PASSWORD_REUSE_TIME         365
+◦	  PASSWORD_REUSE_MAX          10
+◦	  PASSWORD_VERIFY_FUNCTION    ORA12C_STRONG_VERIFY_FUNCTION
+◦	  FAILED_LOGIN_ATTEMPTS       5
+◦	  PASSWORD_LOCK_TIME          1/24
+◦	  INACTIVE_ACCOUNT_TIME       30
+◦	  SESSIONS_PER_USER           5
+◦	  IDLE_TIME                   30
+◦	  CONNECT_TIME                480;
+
+◦	CREATE PROFILE dba_profile LIMIT
+◦	  PASSWORD_LIFE_TIME          60
+◦	  PASSWORD_REUSE_TIME         365
+◦	  PASSWORD_REUSE_MAX          15
+◦	  PASSWORD_VERIFY_FUNCTION    ORA12C_STRONG_VERIFY_FUNCTION
+◦	  FAILED_LOGIN_ATTEMPTS       3
+◦	  PASSWORD_LOCK_TIME          1/12
+◦	  INACTIVE_ACCOUNT_TIME       15
+◦	  SESSIONS_PER_USER           3
+◦	  IDLE_TIME                   15
+◦	  CONNECT_TIME                600;
+
+◦	CREATE PROFILE svc_account_profile LIMIT
+◦	  PASSWORD_LIFE_TIME          UNLIMITED
+◦	  PASSWORD_VERIFY_FUNCTION    ORA12C_STRONG_VERIFY_FUNCTION
+◦	  FAILED_LOGIN_ATTEMPTS       3
+◦	  PASSWORD_LOCK_TIME          UNLIMITED
+◦	  SESSIONS_PER_USER           10
+◦	  IDLE_TIME                   60;
+
+Step 3: Assign Profiles to All Users
+✓	Assign profiles to all 50 users (replace DEFAULT for all users):
+◦	-- Assign to application accounts:
+◦	ALTER USER <app_user> PROFILE app_user_profile;
+◦	
+◦	-- Assign to DBA accounts:
+◦	ALTER USER <dba_user> PROFILE dba_profile;
+◦	
+◦	-- Verify no users remain on DEFAULT profile:
+◦	SELECT username, profile FROM dba_users WHERE profile = 'DEFAULT' AND account_status = 'OPEN';
+
+✓	Ensure SEC_CASE_SENSITIVE_LOGON is TRUE (required for modern password hashing):
+◦	ALTER SYSTEM SET SEC_CASE_SENSITIVE_LOGON = TRUE SCOPE = BOTH;
+✓	Establish a quarterly user access review process: export dba_users, review with app owners, lock stale accounts.
+ 
+3.4 Securely Configure Systems — Rating: YELLOW — FULLY FIXABLE
+
+Finding A: Patch Level 19.28 (Latest is 19.29)
+✓	Apply Oracle Database 19.29 Release Update (RU) at the next scheduled maintenance window.
+◦	Download from My Oracle Support (MOS) — requires active support contract (CSI number). No additional license cost.
+◦	19.29 RU includes security patches from Oracle's quarterly CPU (Critical Patch Update).
+✓	Apply using OPatch:
+◦	$ opatch apply <patch_directory>
+◦	# Verify post-patching:
+◦	SELECT patch_id, version, action, action_time FROM dba_registry_sqlpatch ORDER BY action_time DESC;
+✓	Establish a patching SLA: apply each quarterly CPU RU within 30 days of release.
+
+Finding B: 45/50 Users Have Unlimited Concurrent Sessions + 31 With No Idle Timeout
+✓	This is addressed by the profile changes in Section 3.3 (SESSIONS_PER_USER and IDLE_TIME limits). No additional action needed beyond profile assignment.
+
+Finding C: 6 Unused Database Components/Options
+✓	Identify all installed but unused components:
+◦	SELECT comp_name, status, version FROM dba_registry WHERE status != 'VALID' OR comp_name IN
+◦	  ('Oracle XML DB','Oracle Text','Oracle Spatial','Oracle OLAP','Oracle Data Mining',
+◦	   'Oracle Label Security','Oracle Database Vault') ORDER BY comp_name;
+◦	
+◦	-- Also check options:
+◦	SELECT parameter, value FROM v$option WHERE value = 'TRUE' ORDER BY parameter;
+✓	For each unused component, follow Oracle's documented removal procedure. Common removals:
+◦	Oracle XML DB: Cannot be removed in 19c (mandatory component). Restrict access instead.
+◦	Oracle Text: If unused, restrict CTXSYS account: ALTER USER CTXSYS ACCOUNT LOCK;
+◦	Oracle Spatial/SDO: Restrict MDSYS account if not used by applications.
+◦	Oracle OLAP: Run $ORACLE_HOME/oraolap/admin/olapsys.sql with deinstall option if licensed.
+✓	Lock the accounts for all components not actively used by applications:
+◦	ALTER USER CTXSYS  ACCOUNT LOCK;
+◦	ALTER USER MDSYS   ACCOUNT LOCK;
+◦	ALTER USER OLAPSYS ACCOUNT LOCK;
+◦	IMPORTANT: Confirm with application owners before locking — some components have non-obvious dependencies.
+
+Finding D: Diagnostic Destination Configured
+✓	Review who has READ access to the ADR (Automatic Diagnostic Repository) directory at the OS level:
+◦	SHOW PARAMETER diagnostic_dest;
+◦	-- Then at OS level: ls -la <diagnostic_dest>/diag/rdbms/
+✓	Restrict OS permissions on ADR directories to oracle:dba only:
+◦	chmod 750 <diagnostic_dest>/diag
+◦	chown -R oracle:dba <diagnostic_dest>/diag
+✓	Ensure the background_dump_dest and alert log paths are not world-readable.
+ 
+3.5 Monitor & Audit Activity — Rating: YELLOW — FULLY FIXABLE
+All audit gaps identified by DBSAT are fixable using Oracle 19c Unified Auditing, which is included in the database at no additional cost. Oracle 19c uses Unified Auditing by default.
+
+Step 1: Verify Unified Auditing is Enabled
+✓	Confirm Unified Auditing mode:
+◦	SELECT value FROM v$option WHERE parameter = 'Unified Auditing';
+◦	If TRUE, Unified Auditing is active. If FALSE, the database was linked with traditional auditing — contact Oracle Support to relink.
+
+Step 2: Create All Missing Audit Policies
+✓	LOGOFF events:
+◦	CREATE AUDIT POLICY audit_logoff ACTIONS LOGOFF;
+◦	AUDIT POLICY audit_logoff;
+
+✓	Database management actions (startup/shutdown/alter system):
+◦	CREATE AUDIT POLICY audit_db_mgmt
+◦	  ACTIONS COMPONENT = DATAPUMP EXPORT,
+◦	  ACTIONS ALTER SYSTEM, ALTER DATABASE;
+◦	AUDIT POLICY audit_db_mgmt BY USERS WITH GRANTED ROLES DBA;
+
+✓	Password change events:
+◦	CREATE AUDIT POLICY audit_pwd_change ACTIONS ALTER USER;
+◦	AUDIT POLICY audit_pwd_change;
+
+✓	Protect the audit trail itself (AUDSYS.AUD$UNIFIED):
+◦	CREATE AUDIT POLICY audit_trail_protection
+◦	  ACTIONS SELECT ON AUDSYS.AUD$UNIFIED,
+◦	          DELETE ON AUDSYS.AUD$UNIFIED,
+◦	          UPDATE ON AUDSYS.AUD$UNIFIED;
+◦	AUDIT POLICY audit_trail_protection;
+
+✓	Synonym management:
+◦	CREATE AUDIT POLICY audit_synonyms
+◦	  ACTIONS CREATE SYNONYM, DROP SYNONYM, CREATE PUBLIC SYNONYM, DROP PUBLIC SYNONYM;
+◦	AUDIT POLICY audit_synonyms;
+
+✓	Data Pump exports (CRITICAL — prevents undetected bulk data exfiltration):
+◦	CREATE AUDIT POLICY audit_datapump
+◦	  ACTIONS COMPONENT = DATAPUMP EXPORT;
+◦	AUDIT POLICY audit_datapump;
+
+✓	Privileged account usage (SYS, SYSTEM, SYSDBA):
+◦	AUDIT POLICY ORA_SECURECONFIG;     -- built-in policy, enable it
+◦	AUDIT POLICY ORA_DATABASE_PARAMETER;
+◦	AUDIT POLICY ORA_ACCOUNT_MGMT;
+
+Step 3: Verify All Policies Are Active
+✓	Confirm all policies are enabled:
+◦	SELECT policy_name, enabled_option, entity_name, success, failure
+◦	FROM audit_unified_enabled_policies ORDER BY policy_name;
+
+Step 4: Audit Log Retention
+✓	Set audit trail retention to at minimum 12 months (adjust per compliance requirements):
+◦	-- Check current purge job schedule:
+◦	SELECT * FROM dba_audit_mgmt_config_params;
+◦	
+◦	-- Set retention to 12 months (720 days):
+◦	BEGIN DBMS_AUDIT_MGMT.SET_AUDIT_TRAIL_PROPERTY(
+◦	  DBMS_AUDIT_MGMT.AUDIT_TRAIL_UNIFIED,
+◦	  DBMS_AUDIT_MGMT.OS_FILE_RETENTION_PERIOD, 720); END;
+◦	/
+
+✓	Without a centralized SIEM (AVDF/Data Safe not available), schedule a weekly DBA review of the unified audit trail for anomalous events:
+◦	SELECT event_timestamp, db_username, action_name, object_name, sql_text
+◦	FROM unified_audit_trail
+◦	WHERE event_timestamp > SYSDATE - 7
+◦	  AND action_name IN ('EXPORT','DELETE','LOGOFF','ALTER USER')
+◦	ORDER BY event_timestamp DESC;
+ 
+4. Residual Risk Register
+The following risks cannot be remediated with the current Oracle license. These must be formally accepted and documented by the risk owner.
+
+Risk	DBSAT Category	Why No Free Fix	Compensating Controls
+Data at rest unencrypted (tablespaces, columns, datafiles)	Data Privacy	TDE/column encryption requires ASO add-on license (paid)	OS file permission restriction; NNE for transit (done); audit SELECT on PII tables; physical server access controls
+Full DBA separation of duties enforcement	Access Control	Database Vault requires separate license (paid)	VPD policies on PII/PHI tables (Section 3.2); audit all DBA activity; quarterly privilege review
+No automated/centralized audit monitoring or alerting	Audit Activity	AVDF/Data Safe are paid products	Manual weekly audit trail review (Section 3.5 Step 4); alert on Data Pump activity via cron + mail
+ 
+5. Remediation Roadmap (Native Fixes Only)
+
+Phase 1: Immediate (This Week)
+✓	Change PEOPLE and PS default passwords immediately
+✓	Lock/drop 8 never-used accounts
+✓	Force password reset for all accounts with legacy 10g hashes
+✓	Enable RMAN password-based backup encryption (AES256)
+✓	Enable the 6 missing Unified Audit policies
+✓	Enable built-in audit policies: ORA_SECURECONFIG, ORA_DATABASE_PARAMETER, ORA_ACCOUNT_MGMT
+
+Phase 2: Short-Term (Next 30 Days)
+✓	Create and assign app_user_profile, dba_profile, svc_account_profile to all 50 users
+✓	Set SEC_CASE_SENSITIVE_LOGON = TRUE
+✓	Apply Oracle 19.29 RU at next maintenance window
+✓	Lock accounts for unused database components (CTXSYS, MDSYS, etc.) after confirming with app owners
+✓	Restrict OS-level permissions on datafile directories (chmod 750, oracle:dba ownership)
+✓	Restrict ADR diagnostic directories at OS level
+
+Phase 3: Medium-Term (30-90 Days)
+✓	Implement VPD policies on tables containing PII/PHI to restrict DBA row-level access
+✓	Build and test manual sub-prod masking script covering all identified PII/PHI columns
+✓	Incorporate masking script into sub-prod refresh runbook and enforce as mandatory step
+✓	Set audit trail retention to 720 days minimum
+✓	Establish quarterly user access review process
+✓	Formally document residual risks in the risk register (data at rest encryption, DBV gap)
+
+Phase 4: Ongoing
+✓	Apply each quarterly Oracle CPU RU within 30 days of release
+✓	Run weekly audit trail review query for anomalous events
+✓	Conduct semi-annual user access review (review dba_users against active directory)
+✓	Run DBSAT annually or after major changes to track progress
+✓	Review residual risk register annually with management
+ 
+6. Next Steps — Discussion with Oracle
+As agreed in the DBSAT readout, the following items require discussion with Oracle's team:
+
+•	Discuss prioritization of the remediation actions above in the context of our RAC environment.
+•	Agree on the scope of remediation for each target database.
+•	Confirm which findings Oracle considers addressed by NNE already being in place (transit encryption finding).
+•	Communicate formally to Oracle the license constraint — ASO/TDE, DBV, DMS, and AVDF are not available — and obtain Oracle's acknowledgment of the residual risk items.
+•	Schedule working sessions for Phase 1 and Phase 2 items that require downtime (patch application, profile changes).
+
+Document prepared from Oracle DBSAT readout dated March 10, 2026. All remediation steps use native Oracle 19c EE capabilities. Residual risks are documented in Section 4.
