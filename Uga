@@ -1,0 +1,751 @@
+================================================================================
+        ORACLE SYSADM SCHEMA AUDITING - COMPLETE SETUP GUIDE
+================================================================================
+  Requirements:
+  - Audit trail stored INSIDE DB only (no OS files)
+  - DML must NEVER be halted
+  - Covers: INSERT, UPDATE, DELETE, ALTER, DROP, TRUNCATE
+  - All users tracked on SYSADM schema
+  - Enterprise Edition (no FGA license needed)
+================================================================================
+
+
+--------------------------------------------------------------------------------
+STEP 1 -- PRE-CHECKS: VERIFY ORACLE ENVIRONMENT
+--------------------------------------------------------------------------------
+
+PURPOSE:
+  Confirm your Oracle version and current audit settings before making
+  any changes.
+
+RUN AS: SYSDBA
+
+  -- Check Oracle version
+  SELECT * FROM v$version WHERE banner LIKE 'Oracle%';
+
+  -- Check current audit_trail parameter
+  SHOW PARAMETER audit_trail;
+  -- Note what this currently shows before changing
+
+  -- Check if Unified Auditing is already enabled
+  SELECT value FROM v$option
+  WHERE parameter = 'Unified Auditing';
+  -- If TRUE  --> skip STEP 2 binary relink
+  -- If FALSE --> proceed to STEP 2
+
+  -- Check all databases using this ORACLE_HOME
+  -- Run from OS as oracle user:
+  cat /etc/oratab | grep -v "^#" | grep -v "^$"
+  -- Note all database SIDs listed -- they ALL share the binary
+
+
+--------------------------------------------------------------------------------
+STEP 2 -- BINARY RELINK: ENABLE UNIFIED AUDITING IN ORACLE HOME
+--------------------------------------------------------------------------------
+
+PURPOSE:
+  Relink the Oracle binary to enable Unified Auditing.
+  This affects ALL databases in the same ORACLE_HOME.
+  Only needed if STEP 1 showed Unified Auditing = FALSE.
+
+  !! IMPORTANT !!
+  - Schedule this during a maintenance window
+  - Coordinate with DBAs of ALL databases in this home
+  - Running databases are NOT crashed by relink
+  - Each database needs its OWN restart after relink
+  - Binary backup is MANDATORY before proceeding
+
+RUN AS: oracle OS user
+
+  2a. BACKUP THE ORACLE BINARY FIRST (MANDATORY)
+  -----------------------------------------------
+  cp $ORACLE_HOME/bin/oracle \
+     $ORACLE_HOME/bin/oracle_backup_$(date +%Y%m%d)
+
+  -- Verify backup was created
+  ls -la $ORACLE_HOME/bin/oracle*
+
+
+  2b. STOP THE LISTENER
+  ----------------------
+  lsnrctl stop
+
+
+  2c. RUN THE RELINK
+  -------------------
+  export ORACLE_HOME=/u01/app/oracle/product/19c/db_1
+  export PATH=$ORACLE_HOME/bin:$PATH
+
+  cd $ORACLE_HOME/rdbms/lib
+  make -f ins_rdbms.mk uniaud_on ioracle 2>&1 | \
+  tee /tmp/uniaud_relink.log
+
+  -- Check for errors in log
+  grep -i error  /tmp/uniaud_relink.log
+  grep -i failed /tmp/uniaud_relink.log
+  -- If no errors found -- relink succeeded
+
+
+  2d. VERIFY NEW BINARY
+  ----------------------
+  -- Check binary timestamp updated to today
+  ls -la $ORACLE_HOME/bin/oracle
+
+  -- Verify unified auditing is linked in
+  nm $ORACLE_HOME/bin/oracle | grep -i uniaud
+  -- Should return results confirming it is linked
+
+
+  2e. START LISTENER BACK UP
+  ---------------------------
+  lsnrctl start
+
+
+  2f. RESTART EACH DATABASE (One at a Time, Per Maintenance Window)
+  ------------------------------------------------------------------
+  export ORACLE_SID=PROD1
+  sqlplus / as sysdba
+
+    SHUTDOWN IMMEDIATE;
+    STARTUP;
+
+    -- Verify unified auditing is now active
+    SELECT value FROM v$option
+    WHERE parameter = 'Unified Auditing';
+    -- MUST return TRUE before proceeding
+
+  -- Repeat for every database in this ORACLE_HOME
+
+
+  !! ROLLBACK PLAN -- If relink fails !!
+  ----------------------------------------
+  -- Restore backup binary
+  cp $ORACLE_HOME/bin/oracle_backup_YYYYMMDD \
+     $ORACLE_HOME/bin/oracle
+  -- Restart databases normally
+
+
+--------------------------------------------------------------------------------
+STEP 3 -- DISABLE OLD AUDIT TRAIL (Stop Any OS Audit Files)
+--------------------------------------------------------------------------------
+
+PURPOSE:
+  Turn off the traditional audit_trail parameter so Oracle
+  writes ZERO audit data to the OS or AUD$ table.
+  Unified Auditing handles everything from here.
+
+RUN AS: SYSDBA
+
+  -- Disable old audit trail completely
+  ALTER SYSTEM SET audit_trail = 'NONE' SCOPE = SPFILE;
+
+  -- Requires database restart to take effect
+  SHUTDOWN IMMEDIATE;
+  STARTUP;
+
+  -- Verify after restart
+  SHOW PARAMETER audit_trail;
+  -- MUST show: none
+
+  -- Confirm no OS audit files are being written
+  -- Run from OS as oracle user:
+  ls -la $ORACLE_BASE/admin/$ORACLE_SID/adump/
+  -- Should show no new .aud files being created after this change
+
+
+--------------------------------------------------------------------------------
+STEP 4 -- CREATE DEDICATED AUDIT TABLESPACE
+--------------------------------------------------------------------------------
+
+PURPOSE:
+  Store all audit data in a dedicated tablespace separate from
+  application data. Autoextend ensures audit trail never runs out
+  of space and DML is never halted.
+
+RUN AS: SYSDBA
+
+  -- Create dedicated tablespace
+  -- Adjust file path and sizes to match your environment
+  CREATE TABLESPACE sysadm_audit_ts
+  DATAFILE '/oracle/oradata/sysadm_audit01.dbf'
+  SIZE 10G
+  AUTOEXTEND ON
+  NEXT 1G
+  MAXSIZE 50G
+  EXTENT MANAGEMENT LOCAL
+  SEGMENT SPACE MANAGEMENT AUTO;
+
+  -- Add a second datafile as safety net
+  ALTER TABLESPACE sysadm_audit_ts
+  ADD DATAFILE '/oracle/oradata/sysadm_audit02.dbf'
+  SIZE 10G
+  AUTOEXTEND ON
+  NEXT 1G
+  MAXSIZE 50G;
+
+  -- Verify tablespace created successfully
+  SELECT tablespace_name, status,
+         ROUND(SUM(bytes)/1024/1024/1024,2) AS total_gb,
+         ROUND(SUM(maxbytes)/1024/1024/1024,2) AS max_gb
+  FROM dba_data_files
+  WHERE tablespace_name = 'SYSADM_AUDIT_TS'
+  GROUP BY tablespace_name, status;
+
+
+--------------------------------------------------------------------------------
+STEP 5 -- POINT UNIFIED AUDIT TRAIL TO DEDICATED TABLESPACE
+--------------------------------------------------------------------------------
+
+PURPOSE:
+  Tell Oracle to write all unified audit records to the
+  dedicated tablespace created in STEP 4.
+
+RUN AS: SYSDBA
+
+  -- Initialize audit management
+  EXEC DBMS_AUDIT_MGMT.INIT_CLEANUP(
+      audit_trail_type         =>
+          DBMS_AUDIT_MGMT.AUDIT_TRAIL_UNIFIED,
+      default_cleanup_interval => 12
+  );
+
+  -- Point audit trail to dedicated tablespace
+  EXEC DBMS_AUDIT_MGMT.SET_AUDIT_TRAIL_LOCATION(
+      audit_trail_type           =>
+          DBMS_AUDIT_MGMT.AUDIT_TRAIL_UNIFIED,
+      audit_trail_location_value => 'SYSADM_AUDIT_TS'
+  );
+
+  -- Verify audit trail location
+  SELECT parameter, value
+  FROM dba_audit_mgmt_config_params
+  WHERE parameter = 'AUDIT TRAIL LOCATION';
+  -- Should show SYSADM_AUDIT_TS
+
+
+--------------------------------------------------------------------------------
+STEP 6 -- CREATE AUDIT POLICIES FOR SYSADM SCHEMA
+--------------------------------------------------------------------------------
+
+PURPOSE:
+  Create two separate policies covering all required actions:
+    Policy 1: DDL  -- ALTER, DROP, TRUNCATE (high risk, audit everyone)
+    Policy 2: DML  -- INSERT, UPDATE, DELETE (high volume, exclude app account)
+
+RUN AS: SYSDBA
+
+  6a. DDL POLICY (ALTER, DROP, TRUNCATE)
+  ----------------------------------------
+  -- Audit ALL users with NO exceptions
+  -- These are high risk actions -- always want to know who ran them
+
+  CREATE AUDIT POLICY sysadm_ddl_policy
+  ACTIONS
+      ALTER TABLE,
+      DROP TABLE,
+      TRUNCATE TABLE,
+      ALTER INDEX,
+      DROP INDEX,
+      ALTER SEQUENCE,
+      DROP SEQUENCE,
+      ALTER VIEW,
+      DROP VIEW
+  ON SCHEMA sysadm;
+
+  -- Enable for ALL users
+  AUDIT POLICY sysadm_ddl_policy;
+
+
+  6b. DML POLICY (INSERT, UPDATE, DELETE)
+  ----------------------------------------
+  -- Exclude the SYSADM application account itself
+  -- to reduce audit volume from normal app operations
+  -- Change 'SYSADM' below to your actual app service account name
+  -- if it is different
+
+  CREATE AUDIT POLICY sysadm_dml_policy
+  ACTIONS INSERT, UPDATE, DELETE
+  ON SCHEMA sysadm
+  WHEN 'SYS_CONTEXT(''USERENV'',''SESSION_USER'')
+        != ''SYSADM'''
+  EVALUATE PER SESSION;
+
+  -- Enable for ALL users
+  AUDIT POLICY sysadm_dml_policy;
+
+
+  6c. VERIFY BOTH POLICIES ARE ACTIVE
+  -------------------------------------
+  SELECT
+      policy_name,
+      enabled_option,
+      entity_name,
+      entity_type,
+      success,
+      failure
+  FROM audit_unified_enabled_policies
+  WHERE policy_name IN (
+      'SYSADM_DDL_POLICY',
+      'SYSADM_DML_POLICY'
+  );
+  -- Both policies should appear with enabled status
+
+
+--------------------------------------------------------------------------------
+STEP 7 -- SETUP AUTOMATIC PURGE JOB
+--------------------------------------------------------------------------------
+
+PURPOSE:
+  Automatically delete audit records older than 90 days every 12 hours.
+  This prevents the audit tablespace from filling up over time.
+  Adjust retention days based on your compliance requirements.
+
+RUN AS: SYSDBA
+
+  -- Set archive timestamp (defines what gets kept -- 90 days)
+  EXEC DBMS_AUDIT_MGMT.SET_LAST_ARCHIVE_TIMESTAMP(
+      audit_trail_type  =>
+          DBMS_AUDIT_MGMT.AUDIT_TRAIL_UNIFIED,
+      last_archive_time =>
+          SYSTIMESTAMP - INTERVAL '90' DAY
+  );
+
+  -- Create purge job running every 12 hours
+  EXEC DBMS_AUDIT_MGMT.CREATE_PURGE_JOB(
+      audit_trail_type           =>
+          DBMS_AUDIT_MGMT.AUDIT_TRAIL_UNIFIED,
+      audit_trail_purge_interval => 12,
+      audit_trail_purge_name     => 'SYSADM_AUDIT_PURGE',
+      use_last_arch_timestamp    => TRUE
+  );
+
+  -- Verify purge job was created
+  SELECT job_name, job_status, audit_trail, job_frequency
+  FROM dba_audit_mgmt_cleanup_jobs;
+  -- Should show SYSADM_AUDIT_PURGE as enabled
+
+
+--------------------------------------------------------------------------------
+STEP 8 -- SETUP TABLESPACE MONITORING AND EMERGENCY PROTECTION
+--------------------------------------------------------------------------------
+
+PURPOSE:
+  Monitor audit tablespace usage and automatically trigger emergency
+  purge if space reaches critical levels. Prevents silent audit loss.
+
+  Alert at 70% full -- warning logged
+  Emergency at 85% full -- auto purge to 30 day retention
+
+RUN AS: SYSDBA
+
+  8a. CREATE ALERT LOGGING TABLE
+  --------------------------------
+  CREATE TABLE dba_audit_space_alerts (
+      alert_time       TIMESTAMP,
+      tablespace_name  VARCHAR2(30),
+      pct_used         NUMBER,
+      free_gb          NUMBER,
+      alert_message    VARCHAR2(200)
+  );
+
+
+  8b. CREATE MONITORING PROCEDURE
+  ---------------------------------
+  CREATE OR REPLACE PROCEDURE check_audit_space AS
+      v_pct_used  NUMBER;
+      v_free_gb   NUMBER;
+      v_total_gb  NUMBER;
+  BEGIN
+      SELECT
+          ROUND((1 - fs.free_gb / df.total_gb) * 100, 1),
+          ROUND(fs.free_gb, 2),
+          ROUND(df.total_gb, 2)
+      INTO v_pct_used, v_free_gb, v_total_gb
+      FROM
+          (SELECT SUM(bytes)/1024/1024/1024 AS total_gb
+           FROM dba_data_files
+           WHERE tablespace_name =
+                 'SYSADM_AUDIT_TS') df,
+          (SELECT SUM(bytes)/1024/1024/1024 AS free_gb
+           FROM dba_free_space
+           WHERE tablespace_name =
+                 'SYSADM_AUDIT_TS') fs;
+
+      -- Log warning at 70% full
+      IF v_pct_used >= 70 THEN
+          INSERT INTO dba_audit_space_alerts VALUES (
+              SYSTIMESTAMP,
+              'SYSADM_AUDIT_TS',
+              v_pct_used,
+              v_free_gb,
+              'WARNING: Audit tablespace ' ||
+              v_pct_used || '% full. ' ||
+              v_free_gb || ' GB remaining'
+          );
+          COMMIT;
+      END IF;
+
+      -- Emergency purge at 85% full
+      -- Shrinks retention from 90 days to 30 days temporarily
+      IF v_pct_used >= 85 THEN
+          INSERT INTO dba_audit_space_alerts VALUES (
+              SYSTIMESTAMP,
+              'SYSADM_AUDIT_TS',
+              v_pct_used,
+              v_free_gb,
+              'EMERGENCY: Auto purge triggered at ' ||
+              v_pct_used || '% full. Retention reduced to 30 days'
+          );
+          COMMIT;
+
+          DBMS_AUDIT_MGMT.SET_LAST_ARCHIVE_TIMESTAMP(
+              audit_trail_type  =>
+                  DBMS_AUDIT_MGMT.AUDIT_TRAIL_UNIFIED,
+              last_archive_time =>
+                  SYSTIMESTAMP - INTERVAL '30' DAY
+          );
+          DBMS_AUDIT_MGMT.CLEAN_AUDIT_TRAIL(
+              audit_trail_type        =>
+                  DBMS_AUDIT_MGMT.AUDIT_TRAIL_UNIFIED,
+              use_last_arch_timestamp => TRUE
+          );
+      END IF;
+  END;
+  /
+
+
+  8c. SCHEDULE MONITORING JOB (EVERY 6 HOURS)
+  ----------------------------------------------
+  BEGIN
+      DBMS_SCHEDULER.CREATE_JOB(
+          job_name        => 'AUDIT_SPACE_MONITOR',
+          job_type        => 'STORED_PROCEDURE',
+          job_action      => 'CHECK_AUDIT_SPACE',
+          repeat_interval => 'FREQ=HOURLY;INTERVAL=6',
+          enabled         => TRUE,
+          comments        => 'Monitor SYSADM audit tablespace'
+      );
+  END;
+  /
+
+  -- Verify monitoring job scheduled
+  SELECT job_name, enabled, state, last_run_duration
+  FROM dba_scheduler_jobs
+  WHERE job_name = 'AUDIT_SPACE_MONITOR';
+
+
+--------------------------------------------------------------------------------
+STEP 9 -- FULL VERIFICATION CHECKLIST
+--------------------------------------------------------------------------------
+
+PURPOSE:
+  Run ALL checks below to confirm the complete setup is correct
+  before considering the implementation complete.
+
+RUN AS: SYSDBA
+
+  CHECK 1 -- Old audit trail is OFF (no OS files)
+  -------------------------------------------------
+  SHOW PARAMETER audit_trail;
+  -- MUST show: none
+
+  CHECK 2 -- Unified Auditing is ON
+  -----------------------------------
+  SELECT value FROM v$option
+  WHERE parameter = 'Unified Auditing';
+  -- MUST show: TRUE
+
+  CHECK 3 -- Both policies are active
+  -------------------------------------
+  SELECT policy_name, enabled_option, success, failure
+  FROM audit_unified_enabled_policies
+  WHERE policy_name IN (
+      'SYSADM_DDL_POLICY',
+      'SYSADM_DML_POLICY'
+  );
+  -- Both must appear
+
+  CHECK 4 -- Audit trail going to DB not OS
+  ------------------------------------------
+  SELECT parameter, value
+  FROM dba_audit_mgmt_config_params
+  WHERE parameter = 'AUDIT TRAIL LOCATION';
+  -- Must show SYSADM_AUDIT_TS
+
+  CHECK 5 -- Tablespace has space and autoextend on
+  --------------------------------------------------
+  SELECT
+      df.tablespace_name,
+      ROUND(df.total_gb,2)                         AS total_gb,
+      ROUND(df.total_gb - NVL(fs.free_gb,0),2)     AS used_gb,
+      ROUND(NVL(fs.free_gb,0),2)                   AS free_gb,
+      ROUND((1-NVL(fs.free_gb,0)/df.total_gb)*100,1) AS pct_used,
+      df.autoextensible
+  FROM
+      (SELECT tablespace_name,
+              SUM(bytes)/1024/1024/1024     AS total_gb,
+              MAX(autoextensible)           AS autoextensible
+       FROM dba_data_files
+       WHERE tablespace_name = 'SYSADM_AUDIT_TS'
+       GROUP BY tablespace_name) df,
+      (SELECT tablespace_name,
+              SUM(bytes)/1024/1024/1024 AS free_gb
+       FROM dba_free_space
+       WHERE tablespace_name = 'SYSADM_AUDIT_TS'
+       GROUP BY tablespace_name) fs
+  WHERE df.tablespace_name = fs.tablespace_name;
+  -- autoextensible MUST show YES
+
+  CHECK 6 -- Purge job is scheduled and running
+  -----------------------------------------------
+  SELECT job_name, job_status, audit_trail, job_frequency
+  FROM dba_audit_mgmt_cleanup_jobs;
+  -- Must show SYSADM_AUDIT_PURGE
+
+  CHECK 7 -- Monitoring job is scheduled
+  ----------------------------------------
+  SELECT job_name, enabled, state
+  FROM dba_scheduler_jobs
+  WHERE job_name = 'AUDIT_SPACE_MONITOR';
+  -- Must show enabled = TRUE
+
+  CHECK 8 -- Test audit is actually capturing (do a test)
+  ---------------------------------------------------------
+  -- Connect as a non-SYSADM user and run a test
+  -- then check the trail
+
+  -- As a test user:
+  INSERT INTO sysadm.some_table VALUES (...);
+  COMMIT;
+
+  -- Back as SYSDBA check it was captured:
+  SELECT dbusername, action_name, object_name,
+         event_timestamp, sql_text
+  FROM unified_audit_trail
+  WHERE object_schema = 'SYSADM'
+  ORDER BY event_timestamp DESC
+  FETCH FIRST 5 ROWS ONLY;
+  -- Must show the test INSERT above
+
+
+--------------------------------------------------------------------------------
+STEP 10 -- DAILY AUDIT TRAIL QUERIES (FOR MONITORING AND REPORTING)
+--------------------------------------------------------------------------------
+
+PURPOSE:
+  Use these queries for day-to-day monitoring of who is doing
+  what on the SYSADM schema.
+
+RUN AS: SYSDBA or Auditor user with SELECT on UNIFIED_AUDIT_TRAIL
+
+  QUERY 1 -- Full activity log newest first
+  ------------------------------------------
+  SELECT
+      TO_CHAR(event_timestamp,'DD-MON-YYYY HH24:MI:SS') AS event_time,
+      dbusername          AS who,
+      os_username         AS os_user,
+      userhost            AS machine,
+      client_program_name AS app_used,
+      action_name         AS action,
+      object_name         AS table_name,
+      sql_text            AS sql_run,
+      CASE return_code
+          WHEN 0 THEN 'SUCCESS'
+          ELSE 'FAILED - Code: ' || return_code
+      END                 AS result
+  FROM unified_audit_trail
+  WHERE object_schema = 'SYSADM'
+  ORDER BY event_timestamp DESC;
+
+
+  QUERY 2 -- DDL only (HIGH RISK -- check this daily)
+  -----------------------------------------------------
+  SELECT
+      TO_CHAR(event_timestamp,'DD-MON-YYYY HH24:MI:SS') AS event_time,
+      dbusername,
+      action_name,
+      object_name,
+      sql_text
+  FROM unified_audit_trail
+  WHERE object_schema = 'SYSADM'
+  AND   action_name IN ('ALTER','DROP','TRUNCATE')
+  ORDER BY event_timestamp DESC;
+
+
+  QUERY 3 -- Activity summary by user
+  -------------------------------------
+  SELECT
+      dbusername,
+      action_name,
+      COUNT(*)                  AS total_actions,
+      MIN(event_timestamp)      AS first_action,
+      MAX(event_timestamp)      AS last_action
+  FROM unified_audit_trail
+  WHERE object_schema = 'SYSADM'
+  GROUP BY dbusername, action_name
+  ORDER BY dbusername, total_actions DESC;
+
+
+  QUERY 4 -- Specific user activity
+  -----------------------------------
+  -- Replace JOHN_DBA with the username you want to investigate
+  SELECT
+      event_timestamp,
+      action_name,
+      object_name,
+      sql_text,
+      return_code
+  FROM unified_audit_trail
+  WHERE object_schema = 'SYSADM'
+  AND   dbusername = 'JOHN_DBA'
+  ORDER BY event_timestamp DESC;
+
+
+  QUERY 5 -- Failed attempts only (unauthorized access attempts)
+  ---------------------------------------------------------------
+  SELECT
+      event_timestamp,
+      dbusername,
+      action_name,
+      object_name,
+      return_code,
+      sql_text
+  FROM unified_audit_trail
+  WHERE object_schema = 'SYSADM'
+  AND   return_code != 0
+  ORDER BY event_timestamp DESC;
+
+
+  QUERY 6 -- Audit growth rate per day
+  --------------------------------------
+  SELECT
+      TRUNC(event_timestamp)           AS audit_date,
+      COUNT(*)                         AS records_per_day,
+      COUNT(DISTINCT dbusername)       AS distinct_users,
+      ROUND(COUNT(*) * 400 / 1024 / 1024, 2) AS est_size_mb
+  FROM unified_audit_trail
+  WHERE object_schema = 'SYSADM'
+  GROUP BY TRUNC(event_timestamp)
+  ORDER BY audit_date DESC;
+
+
+  QUERY 7 -- Check space alerts log
+  -----------------------------------
+  SELECT *
+  FROM dba_audit_space_alerts
+  ORDER BY alert_time DESC;
+
+
+--------------------------------------------------------------------------------
+STEP 11 -- WHO HAS ACCESS TO SYSADM (Know Your Risk)
+--------------------------------------------------------------------------------
+
+PURPOSE:
+  Identify all users who have privileges on SYSADM schema objects.
+  Review this list regularly.
+
+RUN AS: SYSDBA
+
+  -- All users with object level privileges on SYSADM
+  SELECT grantee, owner, table_name, privilege,
+         grantor, grantable
+  FROM dba_tab_privs
+  WHERE owner = 'SYSADM'
+  ORDER BY grantee, table_name;
+
+  -- Users with DBA role (can do anything)
+  SELECT grantee, granted_role, admin_option
+  FROM dba_role_privs
+  WHERE granted_role = 'DBA'
+  ORDER BY grantee;
+
+  -- Users with ANY TABLE or schema level privileges
+  SELECT grantee, privilege, admin_option
+  FROM dba_sys_privs
+  WHERE privilege IN (
+      'ALTER ANY TABLE',
+      'DROP ANY TABLE',
+      'INSERT ANY TABLE',
+      'UPDATE ANY TABLE',
+      'DELETE ANY TABLE',
+      'CREATE ANY TABLE'
+  )
+  ORDER BY grantee;
+
+
+--------------------------------------------------------------------------------
+STEP 12 -- EMERGENCY MANUAL PURGE (If Space Becomes Critical)
+--------------------------------------------------------------------------------
+
+PURPOSE:
+  Run this manually ONLY if the automated monitoring does not
+  fire in time and you need to free up space urgently.
+
+RUN AS: SYSDBA
+
+  -- Option A -- Reduce retention to 30 days and purge
+  EXEC DBMS_AUDIT_MGMT.SET_LAST_ARCHIVE_TIMESTAMP(
+      audit_trail_type  =>
+          DBMS_AUDIT_MGMT.AUDIT_TRAIL_UNIFIED,
+      last_archive_time =>
+          SYSTIMESTAMP - INTERVAL '30' DAY
+  );
+
+  EXEC DBMS_AUDIT_MGMT.CLEAN_AUDIT_TRAIL(
+      audit_trail_type        =>
+          DBMS_AUDIT_MGMT.AUDIT_TRAIL_UNIFIED,
+      use_last_arch_timestamp => TRUE
+  );
+
+  -- After emergency passes -- restore 90 day retention
+  EXEC DBMS_AUDIT_MGMT.SET_LAST_ARCHIVE_TIMESTAMP(
+      audit_trail_type  =>
+          DBMS_AUDIT_MGMT.AUDIT_TRAIL_UNIFIED,
+      last_archive_time =>
+          SYSTIMESTAMP - INTERVAL '90' DAY
+  );
+
+  -- Option B -- Add more space to tablespace immediately
+  ALTER TABLESPACE sysadm_audit_ts
+  ADD DATAFILE '/oracle/oradata/sysadm_audit03.dbf'
+  SIZE 10G
+  AUTOEXTEND ON
+  NEXT 1G
+  MAXSIZE 50G;
+
+
+================================================================================
+                         SETTINGS SUMMARY TABLE
+================================================================================
+
+  Setting                   Value           Purpose
+  ------------------------  --------------  ----------------------------------
+  audit_trail               NONE            No OS files -- DB only
+  Unified Auditing          TRUE            Stores in DB -- never halts DML
+  Audit Tablespace          SYSADM_AUDIT_TS Dedicated -- isolated from app data
+  Autoextend                ON              Prevents space exhaustion
+  Max Tablespace Size       50GB            Cap on disk usage (adjust as needed)
+  DDL Policy                ALL USERS       ALTER DROP TRUNCATE -- no exceptions
+  DML Policy                Non-app users   INSERT UPDATE DELETE
+  Purge Interval            12 hours        Keeps trail from growing too large
+  Retention Period          90 days         Adjust per compliance requirements
+  Space Warning Threshold   70%             Alert logged to dba_audit_space_alerts
+  Emergency Purge Threshold 85%             Auto reduces retention to 30 days
+  Monitoring Job Frequency  Every 6 hours   Checks tablespace health
+
+================================================================================
+                         LICENSING SUMMARY
+================================================================================
+
+  Feature Used              License Required
+  ------------------------  ----------------------------------------
+  Unified Auditing          Included with Enterprise Edition (FREE)
+  Standard Audit Policies   Included with Enterprise Edition (FREE)
+  Fine-Grained Auditing     NOT USED -- requires Database Security Pack
+  Audit Vault               NOT USED -- separate product license
+
+  Total extra license cost: NONE -- all features covered by Enterprise Edition
+
+================================================================================
+                              END OF GUIDE
+================================================================================
