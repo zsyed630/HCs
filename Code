@@ -1,4 +1,39 @@
 Perfect — I Can See Exact Values Now!
+
+Better Option — Run in Batches of 500
+This is safer and faster:
+-- Run this 5 times until count = 0
+SET SERVEROUT ON SIZE UNLIMITED
+DECLARE
+    policy_not_found EXCEPTION;
+    PRAGMA EXCEPTION_INIT(policy_not_found, -46357);
+    l_count NUMBER := 0;
+BEGIN
+    FOR p IN (
+        SELECT DISTINCT policy_name
+        FROM audit_unified_enabled_policies
+        WHERE policy_name LIKE 'AUDIT_SYSADM_%'
+        AND ROWNUM <= 500  -- batch of 500
+    )
+    LOOP
+        BEGIN
+            EXECUTE IMMEDIATE
+                'NOAUDIT POLICY ' || p.policy_name;
+            EXECUTE IMMEDIATE
+                'DROP AUDIT POLICY ' || p.policy_name;
+            l_count := l_count + 1;
+        EXCEPTION
+            WHEN OTHERS THEN
+                NULL;
+        END;
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE(
+        'Dropped this batch: ' || l_count);
+END;
+/
+
+
+
 Looking at rows 2 and 5 highlighted in blue:
 Row
 MODULE
