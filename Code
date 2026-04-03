@@ -1,0 +1,12 @@
+-- Generate CREATE AUDIT POLICY for every table
+SELECT 
+    'CREATE AUDIT POLICY audit_' 
+    || LOWER(table_name)
+    || ' ACTIONS INSERT, UPDATE, DELETE ON sysadm.'
+    || table_name
+    || ' WHEN ''SYS_CONTEXT(''''USERENV'''',''''SESSION_USER'''')'
+    || '!=''''SYSADM'''''
+    || ' EVALUATE PER SESSION;'  AS policy_stmt
+FROM dba_tables
+WHERE owner = 'SYSADM'
+ORDER BY table_name;
