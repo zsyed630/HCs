@@ -10,3 +10,147 @@ SELECT
 FROM dba_tables
 WHERE owner = 'SYSADM'
 ORDER BY table_name;
+
+
+Two Scripts — Run in Order
+SCRIPT 1 — Drop All Existing SYSADM DML Policies First
+SET SERVEROUT ON SIZE UNLIMITED
+DECLARE
+    policy_not_found EXCEPTION;
+    PRAGMA EXCEPTION_INIT(policy_not_found, -46357);
+BEGIN
+    FOR p IN (
+        SELECT DISTINCT policy_name
+        FROM audit_unified_enabled_policies
+        WHERE policy_name LIKE 'AUDIT_SYSADM_%'
+    )
+    LOOP
+        BEGIN
+            -- Disable first
+            EXECUTE IMMEDIATE 
+                'NOAUDIT POLICY ' || p.policy_name;
+            -- Then drop
+            EXECUTE IMMEDIATE 
+                'DROP AUDIT POLICY ' || p.policy_name;
+            DBMS_OUTPUT.PUT_LINE(
+                'Dropped: ' || p.policy_name);
+        EXCEPTION
+            WHEN policy_not_found THEN
+                DBMS_OUTPUT.PUT_LINE(
+                    'Not found: ' || p.policy_name);
+            WHEN OTHERS THEN
+                DBMS_OUTPUT.PUT_LINE(
+                    'Error dropping ' || 
+                    p.policy_name || ': ' || SQLERRM);
+        END;
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE('--- Drop complete ---');
+END;
+/
+SCRIPT 2 — Create Per Table DML Policies for ALL SYSADM Tables
+SET SERVEROUT ON SIZE UNLIMITED
+DECLARE
+    l_sql_stmt       VARCHAR2(32767);
+    l_policy_name    VARCHAR2(128);
+    l_count          NUMBER := 0;
+    l_skipped        NUMBER := 0;
+    l_errors         NUMBER := 0;
+
+    -- Exception handlers
+    policy_exists    EXCEPTION;
+    PRAGMA EXCEPTION_INIT(policy_exists, -46358);
+
+BEGIN
+    -- Loop through every table in SYSADM schema
+    FOR t IN (
+        SELECT table_name
+        FROM dba_tables
+        WHERE owner = 'SYSADM'
+        ORDER BY table_name
+    )
+    LOOP
+        -- Build policy name
+        -- Truncate to 128 chars max (Oracle limit)
+        l_policy_name := SUBSTR(
+            'AUDIT_SYSADM_' || LOWER(t.table_name),
+            1, 128
+        );
+
+        BEGIN
+            -- Build CREATE AUDIT POLICY statement
+            l_sql_stmt :=
+                'CREATE AUDIT POLICY ' ||
+                l_policy_name ||
+                ' ACTIONS INSERT, UPDATE, DELETE' ||
+                ' ON sysadm.' || t.table_name ||
+                ' WHEN ''SYS_CONTEXT(''''USERENV'''',' ||
+                '''''SESSION_USER'''') != ''''SYSADM''''' ||
+                ''' EVALUATE PER SESSION';
+
+            -- Create the policy
+            EXECUTE IMMEDIATE l_sql_stmt;
+
+            -- Enable the policy immediately
+            EXECUTE IMMEDIATE
+                'AUDIT POLICY ' || l_policy_name;
+
+            l_count := l_count + 1;
+
+            -- Print progress every 50 tables
+            -- to avoid buffer overflow
+            IF MOD(l_count, 50) = 0 THEN
+                DBMS_OUTPUT.PUT_LINE(
+                    'Progress: ' || l_count ||
+                    ' policies created...');
+            END IF;
+
+        EXCEPTION
+            WHEN policy_exists THEN
+                -- Policy already exists -- skip silently
+                l_skipped := l_skipped + 1;
+
+            WHEN OTHERS THEN
+                -- Log real errors but keep going
+                l_errors := l_errors + 1;
+                IF l_errors <= 20 THEN
+                    -- Only print first 20 errors
+                    -- to avoid buffer overflow
+                    DBMS_OUTPUT.PUT_LINE(
+                        'Error on ' || t.table_name ||
+                        ': ' || SQLERRM);
+                END IF;
+        END;
+    END LOOP;
+
+    -- Final summary
+    DBMS_OUTPUT.PUT_LINE('========================');
+    DBMS_OUTPUT.PUT_LINE('COMPLETE');
+    DBMS_OUTPUT.PUT_LINE('Created : ' || l_count);
+    DBMS_OUTPUT.PUT_LINE('Skipped : ' || l_skipped);
+    DBMS_OUTPUT.PUT_LINE('Errors  : ' || l_errors);
+    DBMS_OUTPUT.PUT_LINE('========================');
+
+END;
+/
+After Both Scripts Run — Verify
+-- Count how many policies got created
+SELECT COUNT(*) AS total_policies
+FROM audit_unified_enabled_policies
+WHERE policy_name LIKE 'AUDIT_SYSADM_%';
+
+-- Spot check a few
+SELECT policy_name, enabled_option,
+       success, failure
+FROM audit_unified_enabled_policies
+WHERE policy_name LIKE 'AUDIT_SYSADM_%'
+AND ROWNUM <= 10;
+Key Fixes From Your Previous Error
+Previous Problem
+Fix Applied
+ORA-20000 buffer overflow
+Print only every 50 rows + limit error output to 20
+ORA-46358 already exists
+Caught and silently skipped
+Script timing out
+No unnecessary output per row
+Run Script 1 first then Script 2. Post results when done.
