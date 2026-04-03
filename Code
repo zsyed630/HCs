@@ -1,35 +1,31 @@
 Perfect — I Can See Exact Values Now!
-
-Correct Approach — Just 2 Policies Total
--- POLICY 1
--- All non-SYSADM users doing DML
--- Uses object_schema filter in audit trail query
+Policy 1 — All Non-SYSADM Users
 CREATE AUDIT POLICY sysadm_dml_other_users
-ACTIONS INSERT, UPDATE, DELETE, TRUNCATE
+ACTIONS INSERT, UPDATE, DELETE
 WHEN 'SYS_CONTEXT(''USERENV'',''SESSION_USER'')
-      != ''SYSADM'''
+      !=''SYSADM'''
 EVALUATE PER SESSION;
 
 AUDIT POLICY sysadm_dml_other_users;
-
--- POLICY 2  
--- SYSADM using psdmt.exe or pside.exe only
+Policy 2 — SYSADM via psdmt.exe or pside.exe
 CREATE AUDIT POLICY sysadm_dml_tools
-ACTIONS INSERT, UPDATE, DELETE, TRUNCATE
+ACTIONS INSERT, UPDATE, DELETE
 WHEN 'SYS_CONTEXT(''USERENV'',''SESSION_USER'')
-      = ''SYSADM''
+      =''SYSADM''
       AND SYS_CONTEXT(''USERENV'',''MODULE'')
       IN (''psdmt.exe'',''pside.exe'')'
 EVALUATE PER SESSION;
 
 AUDIT POLICY sysadm_dml_tools;
-Then filter to SYSADM objects in your query:
-SELECT event_timestamp, dbusername,
-       action_name, object_schema,
-       object_name, sql_text
-FROM unified_audit_trail
-WHERE object_schema = 'SYSADM'
-ORDER BY event_timestamp DESC;
+Verify Both Created
+SELECT policy_name, enabled_option,
+       success, failure
+FROM audit_unified_enabled_policies
+WHERE policy_name IN (
+    'SYSADM_DML_OTHER_USERS',
+    'SYSADM_DML_TOOLS',
+    'SYSADM_DDL_POLICY'
+);
 
 
 
