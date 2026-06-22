@@ -1,0 +1,126 @@
+-- =====================================================================
+-- Oracle 19c PRE-UPGRADE SECURITY BASELINE  (non-Oracle-maintained only)
+-- Captures: users, roles, role grants, direct sys/obj/col privs, quotas
+-- Part A = human-readable inventory   Part B = replay-ready DDL
+-- Run as SYS/DBA. If multitenant: alter session set container=<pdb>; first
+-- =====================================================================
+
+-- ---------- PART A : INVENTORY ----------
+set lines 300 pages 0 trimspool on feedback off heading on long 100000 longchunksize 100000
+column owner    format a30
+column grantee  format a30
+column privilege format a20
+spool db_security_baseline_pre_upgrade.txt
+
+prompt ===== STEP 1: NON-ORACLE USERS =====
+select username, account_status, default_tablespace, temporary_tablespace, profile, created, oracle_maintained
+from dba_users
+where oracle_maintained = 'N'
+order by username;
+
+prompt ===== STEP 2: NON-ORACLE ROLES =====
+select role, oracle_maintained, authentication_type
+from dba_roles
+where oracle_maintained = 'N'
+order by role;
+
+prompt ===== STEP 3: ROLE GRANTS =====
+select grantee, granted_role, admin_option, default_role, common
+from dba_role_privs
+where grantee in (
+    select username from dba_users where oracle_maintained = 'N'
+    union
+    select role     from dba_roles where oracle_maintained = 'N')
+order by grantee, granted_role;
+
+prompt ===== STEP 4: SYSTEM PRIVS (incl. direct-to-user) =====
+select grantee, privilege, admin_option, common
+from dba_sys_privs
+where grantee in (
+    select username from dba_users where oracle_maintained = 'N'
+    union
+    select role     from dba_roles where oracle_maintained = 'N')
+order by grantee, privilege;
+
+prompt ===== STEP 5: OBJECT PRIVS (incl. direct-to-user) =====
+select grantee, owner, table_name, privilege, grantor, grantable, hierarchy, type
+from dba_tab_privs
+where grantee in (
+    select username from dba_users where oracle_maintained = 'N'
+    union
+    select role     from dba_roles where oracle_maintained = 'N')
+order by grantee, owner, table_name, privilege;
+
+prompt ===== STEP 6: COLUMN-LEVEL OBJECT PRIVS =====
+select grantee, owner, table_name, column_name, privilege, grantable
+from dba_col_privs
+where grantee in (
+    select username from dba_users where oracle_maintained = 'N'
+    union
+    select role     from dba_roles where oracle_maintained = 'N')
+order by grantee, owner, table_name, column_name, privilege;
+
+prompt ===== STEP 7: TABLESPACE QUOTAS =====
+select username, tablespace_name, bytes, max_bytes
+from dba_ts_quotas
+where username in (select username from dba_users where oracle_maintained = 'N')
+order by username, tablespace_name;
+
+spool off
+
+-- ---------- PART B : REPLAY-READY DDL ----------
+set lines 300 pages 0 long 2000000 longchunksize 2000000 trimspool on feedback off heading off verify off
+begin
+  dbms_metadata.set_transform_param(dbms_metadata.session_transform,'SQLTERMINATOR',true);
+  dbms_metadata.set_transform_param(dbms_metadata.session_transform,'PRETTY',true);
+  dbms_metadata.set_transform_param(dbms_metadata.session_transform,'SEGMENT_ATTRIBUTES',false);
+end;
+/
+spool db_security_baseline_ddl.sql
+
+prompt -- ===== B1: CREATE USER =====
+select dbms_metadata.get_ddl('USER', username)
+from dba_users
+where oracle_maintained = 'N'
+order by username;
+
+prompt -- ===== B2: CREATE ROLE =====
+select dbms_metadata.get_ddl('ROLE', role)
+from dba_roles
+where oracle_maintained = 'N'
+order by role;
+
+prompt -- ===== B3: ROLE GRANTS =====
+select dbms_metadata.get_granted_ddl('ROLE_GRANT', grantee)
+from ( select distinct grantee from dba_role_privs
+       where grantee in (
+         select username from dba_users where oracle_maintained = 'N'
+         union
+         select role     from dba_roles where oracle_maintained = 'N'))
+order by grantee;
+
+prompt -- ===== B4: SYSTEM PRIV GRANTS =====
+select dbms_metadata.get_granted_ddl('SYSTEM_GRANT', grantee)
+from ( select distinct grantee from dba_sys_privs
+       where grantee in (
+         select username from dba_users where oracle_maintained = 'N'
+         union
+         select role     from dba_roles where oracle_maintained = 'N'))
+order by grantee;
+
+prompt -- ===== B5: OBJECT PRIV GRANTS =====
+select dbms_metadata.get_granted_ddl('OBJECT_GRANT', grantee)
+from ( select distinct grantee from dba_tab_privs
+       where grantee in (
+         select username from dba_users where oracle_maintained = 'N'
+         union
+         select role     from dba_roles where oracle_maintained = 'N'))
+order by grantee;
+
+prompt -- ===== B6: TABLESPACE QUOTAS DDL =====
+select dbms_metadata.get_granted_ddl('TABLESPACE_QUOTA', username)
+from ( select distinct username from dba_ts_quotas
+       where username in (select username from dba_users where oracle_maintained = 'N'))
+order by username;
+
+spool off
