@@ -1,3 +1,37 @@
+sqlplus -s "/ as sysdba" <<'EOF'
+SET LINESIZE 220 PAGESIZE 200 FEEDBACK OFF
+COLUMN module FORMAT A34
+COLUMN action FORMAT A34
+COLUMN program FORMAT A40
+COLUMN client_id FORMAT A24
+COLUMN machine FORMAT A24
+COLUMN samples FORMAT 999,990
+PROMPT === WHAT PEOPLESOFT ACTUALLY STAMPS - PRCS_INST 26200807 ===
+WITH w AS (SELECT TIMESTAMP '2026-07-20 13:23:23' b, TIMESTAMP '2026-07-20 13:57:49' e FROM dual),
+s AS (SELECT MIN(snap_id) lo, MAX(snap_id) hi FROM dba_hist_snapshot, w WHERE end_interval_time >= w.b AND begin_interval_time <= w.e)
+SELECT h.module, h.action, h.client_id, COUNT(*) samples, COUNT(DISTINCT h.sql_id) sqls
+FROM dba_hist_active_sess_history h, w, s
+WHERE h.snap_id BETWEEN s.lo AND s.hi
+AND h.sample_time BETWEEN w.b AND w.e
+AND h.sql_id IS NOT NULL
+GROUP BY h.module, h.action, h.client_id
+ORDER BY samples DESC
+FETCH FIRST 30 ROWS ONLY;
+PROMPT === SAME WINDOW BY PROGRAM / MACHINE / NODE ===
+WITH w AS (SELECT TIMESTAMP '2026-07-20 13:23:23' b, TIMESTAMP '2026-07-20 13:57:49' e FROM dual),
+s AS (SELECT MIN(snap_id) lo, MAX(snap_id) hi FROM dba_hist_snapshot, w WHERE end_interval_time >= w.b AND begin_interval_time <= w.e)
+SELECT h.program, h.machine, h.instance_number node, COUNT(*) samples, COUNT(DISTINCT h.sql_id) sqls
+FROM dba_hist_active_sess_history h, w, s
+WHERE h.snap_id BETWEEN s.lo AND s.hi
+AND h.sample_time BETWEEN w.b AND w.e
+AND h.sql_id IS NOT NULL
+GROUP BY h.program, h.machine, h.instance_number
+ORDER BY samples DESC
+FETCH FIRST 30 ROWS ONLY;
+EXIT;
+EOF
+
+
 
 ORACLE DATABASE SECURITY ASSESSMENT
 Native Remediation Plan — No Additional Product Licensing
