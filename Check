@@ -1,3 +1,9 @@
+export ORACLE_SID=FSQUA2
+mkdir -p ~/fscebd_pulse && cd ~/fscebd_pulse
+cp /path/to/fscebd_pulse.sql .
+nohup bash -c 'while true; do echo "########## $(date +%Y-%m-%d\ %H:%M:%S) node=$ORACLE_SID ##########"; sqlplus -S / as sysdba @fscebd_pulse.sql; sleep 300; done' >> pulse_$(date +%Y%m%d_%H%M).log 2>&1 &
+echo "started. tail -f ~/fscebd_pulse/pulse_*.log    stop with: kill %1"
+
 
 mkdir -p ~/fscebd_pulse && cd ~/fscebd_pulse && nohup bash -c 'while true; do echo "########## $(date +%Y-%m-%d\ %H:%M:%S) ##########"; sqlplus -S /@FSQUA @fscebd_pulse.sql; sleep 300; done' >> pulse_$(date +%Y%m%d_%H%M).log 2>&1 &
 echo "started, tail with:  tail -f ~/fscebd_pulse/pulse_*.log"
