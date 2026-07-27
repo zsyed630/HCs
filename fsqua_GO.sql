@@ -14,8 +14,8 @@
 --  Then hand the job to the user. Targets, measured in FPRD:
 --
 --    RUN CONTROL                       PRE-UPGRADE   NOW      TARGET
---    FDC_COMBO_BUILD_MASTER_RUNCNTL    72.7 min      202.3    ~73 min
---    coa                               13.4 min       80.8    ~13 min
+--    FDC_COMBO_BUILD_MASTER_RUNCNTL    72.7 min      202.3    73 min
+--    coa                               13.4 min       80.8    13 min
 --
 --  Both regressed. Both are driven by the same four statistics
 --  statements against PS_COMBO_DATA_TBL and its two indexes.
@@ -388,8 +388,8 @@ BEGIN
     p(' ');
     p('    RUN CONTROL                       WAS      NOW      TARGET');
     p('    ------------------------------    ------   ------   ------');
-    p('    FDC_COMBO_BUILD_MASTER_RUNCNTL    72.7 m   202.3 m  ~73 m');
-    p('    coa                               13.4 m    80.8 m  ~13 m');
+    p('    FDC_COMBO_BUILD_MASTER_RUNCNTL    72.7 m   202.3 m  73 m');
+    p('    coa                               13.4 m    80.8 m  13 m');
     p(' ');
     p('  WAS is the pre-upgrade FPRD average for that same run control.');
     p('  NOW is the post-upgrade FPRD average. TARGET is a return to WAS.');
