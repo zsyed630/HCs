@@ -123,10 +123,9 @@ BEGIN
   p('[1] RUNTIME SHAPE BOTH SIDES OF THE CUTOVER');
   p('  ' || RPAD('BUCKET', 16) || LPAD('PRE', 8) || LPAD('POST', 8));
   BEGIN
-    FOR r IN (SELECT bucket,
-                     SUM(CASE WHEN era = 'PRE'  THEN 1 ELSE 0 END) pre,
-                     SUM(CASE WHEN era = 'POST' THEN 1 ELSE 0 END) post,
-                     MIN(ord) ord
+    FOR r IN (SELECT ord_seq, bucket,
+                     SUM(CASE WHEN era = 'PRE'  THEN 1 ELSE 0 END) n_pre,
+                     SUM(CASE WHEN era = 'POST' THEN 1 ELSE 0 END) n_post
               FROM (
                 SELECT CASE WHEN BEGINDTTM < v_cut THEN 'PRE' ELSE 'POST' END era,
                        CASE
@@ -140,14 +139,15 @@ BEGIN
                        CASE
                          WHEN mins <  15 THEN 1 WHEN mins <  30 THEN 2
                          WHEN mins <  75 THEN 3 WHEN mins < 150 THEN 4
-                         WHEN mins < 240 THEN 5 ELSE 6 END ord
+                         WHEN mins < 240 THEN 5 ELSE 6 END ord_seq
                 FROM (SELECT BEGINDTTM,
                              (CAST(ENDDTTM AS DATE) - CAST(BEGINDTTM AS DATE)) * 1440 mins
                       FROM   SYSADM.PSPRCSRQST
                       WHERE  PRCSNAME = 'FS_CEBD' AND ENDDTTM IS NOT NULL))
-              GROUP BY bucket ORDER BY MIN(ord))
+              GROUP BY ord_seq, bucket
+              ORDER BY ord_seq)
     LOOP
-      p('  ' || RPAD(r.bucket, 16) || LPAD(r.pre, 8) || LPAD(r.post, 8));
+      p('  ' || RPAD(r.bucket, 16) || LPAD(r.n_pre, 8) || LPAD(r.n_post, 8));
     END LOOP;
   EXCEPTION WHEN OTHERS THEN p('  failed: ' || SUBSTR(SQLERRM, 1, 60));
   END;
