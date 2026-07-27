@@ -1,3 +1,7 @@
+cd ~/fscebd_pulse && kill %1 2>/dev/null; pkill -f 'while true' 2>/dev/null; chmod +x pulse_loop.sh && ./pulse_loop.sh 300 &
+sleep 20 && tail -f ~/fscebd_pulse/pulse_*.log
+
+
 export ORACLE_SID=FSQUA2
 mkdir -p ~/fscebd_pulse && cd ~/fscebd_pulse
 cp /path/to/fscebd_pulse.sql .
