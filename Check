@@ -1,4 +1,8 @@
 
+mkdir -p ~/fscebd_pulse && cd ~/fscebd_pulse && nohup bash -c 'while true; do echo "########## $(date +%Y-%m-%d\ %H:%M:%S) ##########"; sqlplus -S /@FSQUA @fscebd_pulse.sql; sleep 300; done' >> pulse_$(date +%Y%m%d_%H%M).log 2>&1 &
+echo "started, tail with:  tail -f ~/fscebd_pulse/pulse_*.log"
+
+
 SELECT 'ESTIMATE_PERCENT' pref, DBMS_STATS.GET_PREFS('ESTIMATE_PERCENT','SYSADM','PS_COMBO_DATA_TBL') val FROM dual
 UNION ALL SELECT 'METHOD_OPT', DBMS_STATS.GET_PREFS('METHOD_OPT','SYSADM','PS_COMBO_DATA_TBL') FROM dual
 UNION ALL SELECT 'CASCADE', DBMS_STATS.GET_PREFS('CASCADE','SYSADM','PS_COMBO_DATA_TBL') FROM dual
