@@ -1,3 +1,7 @@
+cd ~/fscebd_pulse && ls -l fscebd_pin.sql fscebd_rca.sql && sed -i "s/^  :v_pi       := .*/  :v_pi       := 26270723;/" fscebd_pin.sql && grep -n "v_pi " fscebd_pin.sql && . oraenv && OUT=rca_$(date +%Y%m%d_%H%M%S).log && timeout 2400 sqlplus -s -L "/ as sysdba" @fscebd_rca.sql </dev/null > "$OUT" 2>&1; echo "exit=$?"; ls -lh "$OUT"; sed -n '1,40p' "$OUT"; echo "=== errors ==="; grep -n "^ORA-\|^SP2-" "$OUT" | head -20
+
+
+
 cd ~/fscebd_pulse && cat > fs_seg.sql <<'EOF'
 SET DEFINE OFF FEEDBACK OFF LINESIZE 190 PAGESIZE 300 TRIMSPOOL ON
 ALTER SESSION DISABLE PARALLEL QUERY;
