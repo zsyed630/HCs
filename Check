@@ -1,3 +1,31 @@
+
+cd ~/fscebd_pulse && cat > fs_ids.sql <<'EOF'
+SET DEFINE OFF FEEDBACK OFF LINESIZE 200 PAGESIZE 400 LONG 400 TRIMSPOOL ON
+ALTER SESSION DISABLE PARALLEL QUERY;
+COL txt FOR A150 WORD_WRAPPED
+COL sql_id FOR A14
+PROMPT ===== WHAT ARE THESE STATEMENTS =====
+SELECT sql_id, SUBSTR(REGEXP_REPLACE(sql_text,'[[:space:]]+',' '),1,150) txt
+FROM   dba_hist_sqltext
+WHERE  sql_id IN ('a669dby3jvzhc','f4v8yvxn8pn1p','bp3nhn5v4ms9t','6hh8xgvmyqrzs',
+                  '1ggxdkgha6w5b','dzwtj4k3s6b29','gfwtunj2gn5uc','as5mguh1q7uwy',
+                  'bax0ny0p7jxd1','byd6fx9kt5vdg','7zcrh149z75jx','41zzdbmdhhxbw');
+PROMPT ===== DID THE OLD FOUR RUN SINCE THE FIX (07-28) =====
+WITH s AS (SELECT MIN(snap_id) lo, MAX(snap_id) hi, MAX(dbid) dbid
+           FROM dba_hist_snapshot WHERE end_interval_time > TIMESTAMP '2026-07-28 00:00:00')
+SELECT h.sql_id, COUNT(*)*10 db_secs,
+       TO_CHAR(MIN(h.sample_time),'MM-DD HH24:MI') first_seen,
+       TO_CHAR(MAX(h.sample_time),'MM-DD HH24:MI') last_seen
+FROM   dba_hist_active_sess_history h, s
+WHERE  h.snap_id BETWEEN s.lo AND s.hi AND h.dbid = s.dbid
+AND    h.sql_id IN ('f4v8yvxn8pn1p','1ggxdkgha6w5b','6hh8xgvmyqrzs','bp3nhn5v4ms9t')
+GROUP  BY h.sql_id ORDER BY 2 DESC;
+PROMPT (no rows = all four are gone from production)
+EXIT
+EOF
+sqlplus -s -L "/ as sysdba" @fs_ids.sql
+
+
 cd ~/fscebd_pulse && cat > fs_live.sql <<'EOF'
 SET DEFINE OFF FEEDBACK OFF VERIFY OFF LINESIZE 165 PAGESIZE 400 TRIMSPOOL ON
 ALTER SESSION DISABLE PARALLEL QUERY;
