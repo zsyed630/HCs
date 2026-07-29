@@ -1,3 +1,44 @@
+
+cd ~/fscebd_pulse && cat > fs_del.sql <<'EOF'
+SET DEFINE OFF FEEDBACK OFF LINESIZE 190 PAGESIZE 200 TRIMSPOOL ON
+ALTER SESSION DISABLE PARALLEL QUERY;
+COL event FOR A32
+COL cid FOR A10
+COL era FOR A12
+PROMPT ===== DELETE PROGRESS : undo records climbing = it is working =====
+SELECT s.inst_id i, s.sid, s.client_identifier cid, s.sql_id, s.event,
+       t.used_ublk undo_blks, t.used_urec urecs,
+       ROUND(t.used_urec/GREATEST(s.last_call_et,1)) urec_per_sec,
+       ROUND(s.last_call_et/60,1) call_min
+FROM   gv$session s JOIN gv$transaction t
+       ON t.inst_id=s.inst_id AND t.ses_addr=s.saddr
+WHERE  s.type='USER' ORDER BY t.used_urec DESC;
+PROMPT ===== TAO4 DRIVING KEYS FOR THIS RUN =====
+SELECT setid, process_group FROM sysadm.ps_fs_cebd_tao4
+WHERE  process_instance=26270723;
+PROMPT ===== MODEL CALL : BEFORE vs AFTER THE 07-28 FIX =====
+WITH s AS (SELECT MIN(snap_id) lo, MAX(snap_id) hi, MAX(dbid) dbid
+           FROM dba_hist_snapshot WHERE end_interval_time > SYSDATE-45)
+SELECT CASE WHEN sn.end_interval_time < TIMESTAMP '2026-07-28 12:00:00'
+            THEN 'BEFORE FIX' ELSE 'AFTER FIX' END era,
+       SUM(st.executions_delta) execs,
+       ROUND(SUM(st.elapsed_time_delta)/1e6,1) total_s,
+       ROUND(SUM(st.elapsed_time_delta)/1e6
+             /NULLIF(SUM(st.executions_delta),0),2) avg_s_per_exec
+FROM   dba_hist_sqlstat st, dba_hist_snapshot sn, s
+WHERE  st.snap_id BETWEEN s.lo AND s.hi AND st.dbid = s.dbid
+AND    sn.snap_id = st.snap_id AND sn.dbid = st.dbid
+AND    sn.instance_number = st.instance_number
+AND    st.sql_id = '1mxusbsxafhkh'
+GROUP  BY CASE WHEN sn.end_interval_time < TIMESTAMP '2026-07-28 12:00:00'
+               THEN 'BEFORE FIX' ELSE 'AFTER FIX' END;
+EXIT
+EOF
+sqlplus -s -L "/ as sysdba" @fs_del.sql
+
+
+
+
 cd ~/fscebd_pulse && cat > fs_next.sql <<'EOF'
 SET DEFINE OFF FEEDBACK OFF LINESIZE 190 PAGESIZE 300 LONG 4000 TRIMSPOOL ON
 COL txt FOR A170 WORD_WRAPPED
