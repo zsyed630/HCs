@@ -1,3 +1,42 @@
+cd ~/fscebd_pulse && cat > fs_idx.sql <<'EOF'
+SET DEFINE OFF FEEDBACK OFF LINESIZE 190 PAGESIZE 300 TRIMSPOOL ON
+ALTER SESSION DISABLE PARALLEL QUERY;
+COL operation FOR A22
+COL options FOR A20
+COL object_name FOR A24
+COL index_name FOR A22
+PROMPT ===== WHICH INDEX DOES EACH DELETE PLAN USE =====
+SELECT DISTINCT plan_hash_value phv, id, operation, options, object_name
+FROM   dba_hist_sql_plan
+WHERE  plan_hash_value IN (1034386389,3458525469)
+ORDER  BY plan_hash_value, id;
+PROMPT ===== INDEX STATS : SAMPLE SIZE BEHIND THE CF =====
+SELECT index_name, num_rows, sample_size,
+       ROUND(sample_size/NULLIF(num_rows,0)*100,2) pct_sampled,
+       clustering_factor cf, last_analyzed
+FROM   dba_ind_statistics
+WHERE  owner='SYSADM' AND table_name='PS_COMBO_DATA_TBL'
+ORDER  BY index_name;
+PROMPT ===== WAS THE 26068516 RUN USING A DIFFERENT INDEX =====
+WITH s AS (SELECT MIN(snap_id) lo, MAX(snap_id) hi, MAX(dbid) dbid
+           FROM dba_hist_snapshot WHERE end_interval_time > SYSDATE-45)
+SELECT h.sql_plan_hash_value phv, h.sql_plan_line_id line, COUNT(*)*10 db_secs
+FROM   dba_hist_active_sess_history h, s
+WHERE  h.snap_id BETWEEN s.lo AND s.hi AND h.dbid = s.dbid
+AND    h.sql_id = 'bax0ny0p7jxd1'
+GROUP  BY h.sql_plan_hash_value, h.sql_plan_line_id
+ORDER  BY 3 DESC;
+PROMPT ===== RUN CLOCK =====
+SELECT runstatus, ROUND((CAST(NVL(enddttm,SYSTIMESTAMP) AS DATE)
+       -CAST(begindttm AS DATE))*1440,1) mins
+FROM   sysadm.psprcsrqst WHERE prcsinstance=26270723;
+EXIT
+EOF
+sqlplus -s -L "/ as sysdba" @fs_idx.sql
+
+
+
+
 cd ~/fscebd_pulse && cat > fs_del2.sql <<'EOF'
 SET DEFINE OFF FEEDBACK OFF LINESIZE 190 PAGESIZE 300 TRIMSPOOL ON
 ALTER SESSION DISABLE PARALLEL QUERY;
