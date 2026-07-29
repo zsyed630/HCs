@@ -1,3 +1,58 @@
+
+cd ~/fscebd_pulse && cat > fs_live.sql <<'EOF'
+SET DEFINE OFF FEEDBACK OFF VERIFY OFF LINESIZE 200 PAGESIZE 300 TRIMSPOOL ON
+ALTER SESSION SET nls_date_format='YYYY-MM-DD HH24:MI:SS';
+ALTER SESSION DISABLE PARALLEL QUERY;
+COL runcntlid FOR A30
+COL oprid FOR A10
+COL event FOR A32
+COL ev FOR A34
+COL target FOR A28
+COL opname FOR A22
+PROMPT ===== PROCESS SCHEDULER =====
+SELECT prcsinstance, oprid, runcntlid, runstatus, begindttm,
+       ROUND((NVL(enddttm,SYSDATE)-begindttm)*1440,1) mins
+FROM   sysadm.psprcsrqst
+WHERE  prcsname='FS_CEBD' AND begindttm > SYSDATE-1
+ORDER  BY begindttm DESC FETCH FIRST 5 ROWS ONLY;
+PROMPT ===== LIVE SESSIONS =====
+SELECT s.inst_id i, s.sid, s.serial#, s.client_identifier cid, s.state,
+       s.event, s.seconds_in_wait siw, s.sql_id, q.plan_hash_value phv,
+       ROUND(s.last_call_et/60,1) call_min
+FROM   gv$session s
+LEFT   JOIN gv$sql q ON q.inst_id=s.inst_id AND q.sql_id=s.sql_id
+                    AND q.child_number=s.sql_child_number
+WHERE  s.type='USER' AND s.status='ACTIVE'
+AND   (s.program LIKE 'PSAE%'
+       OR s.client_identifier IN (SELECT oprid FROM sysadm.psprcsrqst
+                                  WHERE prcsname='FS_CEBD' AND runstatus=7))
+ORDER  BY s.last_call_et DESC;
+PROMPT ===== LONGOPS =====
+SELECT inst_id i, sid, opname, target, sofar, totalwork,
+       ROUND(sofar/NULLIF(totalwork,0)*100,1) pct, time_remaining tr
+FROM   gv$session_longops WHERE time_remaining > 0 ORDER BY tr DESC;
+PROMPT ===== ASH LAST 5 MIN (memory) =====
+SELECT sql_id, DECODE(session_state,'ON CPU','CPU',event) ev, COUNT(*) samples,
+       ROUND(COUNT(*)*100/SUM(COUNT(*)) OVER (),1) pct
+FROM   gv$active_session_history
+WHERE  sample_time > SYSTIMESTAMP - INTERVAL '5' MINUTE
+AND    session_type='FOREGROUND'
+GROUP  BY sql_id, DECODE(session_state,'ON CPU','CPU',event)
+ORDER  BY COUNT(*) DESC FETCH FIRST 12 ROWS ONLY;
+PROMPT ===== FIX STILL IN FORCE =====
+SELECT table_name, num_rows, sample_size,
+       ROUND(sample_size/NULLIF(num_rows,0)*100,2) pct_sampled, last_analyzed
+FROM   dba_tab_statistics
+WHERE  owner='SYSADM' AND object_type='TABLE'
+AND    table_name IN ('PS_COMBO_DATA_TBL','PS_COMBO_DATA_BUDG')
+ORDER  BY table_name;
+EXIT
+EOF
+sqlplus -s -L "/ as sysdba" @fs_live.sql
+
+
+
+
 cd ~/fscebd_pulse && nohup sqlplus -s -L "/ as sysdba" @fprd_pulse.sql </dev/null > pulse_$(date +%H%M%S).log 2>&1 & echo "pid=$!"; sleep 20; ps -o pid,stat,wchan:20,etime -p $!
 
 SET LINESIZE 250 PAGESIZE 200 DEFINE OFF
