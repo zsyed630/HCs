@@ -1,3 +1,44 @@
+cd ~/fscebd_pulse && cat > fs_del2.sql <<'EOF'
+SET DEFINE OFF FEEDBACK OFF LINESIZE 190 PAGESIZE 300 TRIMSPOOL ON
+ALTER SESSION DISABLE PARALLEL QUERY;
+COL cols FOR A56
+COL index_name FOR A24
+PROMPT ===== DELETE : EXECUTIONS PER RUN =====
+WITH s AS (SELECT MIN(snap_id) lo, MAX(snap_id) hi, MAX(dbid) dbid
+           FROM dba_hist_snapshot WHERE end_interval_time > SYSDATE-45),
+d AS (SELECT sql_id,
+             REGEXP_SUBSTR(TO_CHAR(SUBSTR(sql_text,1,900)),
+                           'PROCESS_INSTANCE = ([0-9]+)',1,1,NULL,1) pi
+      FROM   dba_hist_sqltext
+      WHERE  sql_text LIKE 'DELETE FROM PS_COMBO_DATA_TBL WHERE EXISTS%')
+SELECT d.pi prcs_inst, COUNT(DISTINCT st.sql_id) sqlids,
+       SUM(st.executions_delta) execs,
+       ROUND(SUM(st.elapsed_time_delta)/1e6,1) total_s,
+       SUM(st.rows_processed_delta) rows_deleted,
+       ROUND(SUM(st.buffer_gets_delta)
+             /NULLIF(SUM(st.rows_processed_delta),0),2) gets_per_row
+FROM   dba_hist_sqlstat st JOIN d ON d.sql_id = st.sql_id, s
+WHERE  st.snap_id BETWEEN s.lo AND s.hi AND st.dbid = s.dbid
+GROUP  BY d.pi ORDER BY 4 DESC;
+PROMPT ===== IS THE NESTED-LOOP ACCESS PATH EVEN RIGHT =====
+SELECT i.index_name, i.uniqueness, i.num_rows, i.clustering_factor cf, i.status,
+       LISTAGG(c.column_name,',') WITHIN GROUP (ORDER BY c.column_position) cols
+FROM   dba_indexes i JOIN dba_ind_columns c
+       ON c.index_owner=i.owner AND c.index_name=i.index_name
+WHERE  i.owner='SYSADM' AND i.table_name='PS_COMBO_DATA_TBL'
+GROUP  BY i.index_name, i.uniqueness, i.num_rows, i.clustering_factor, i.status;
+PROMPT ===== HOW SELECTIVE ARE THOSE 7 KEYS =====
+SELECT setid, process_group, COUNT(*) rows_in_scope
+FROM   sysadm.ps_combo_data_tbl
+WHERE  (setid, process_group) IN
+       (SELECT setid, process_group FROM sysadm.ps_fs_cebd_tao4
+        WHERE process_instance = 26270723)
+GROUP  BY setid, process_group ORDER BY 3 DESC;
+EXIT
+EOF
+sqlplus -s -L "/ as sysdba" @fs_del2.sql
+
+
 
 cd ~/fscebd_pulse && cat > fs_del.sql <<'EOF'
 SET DEFINE OFF FEEDBACK OFF LINESIZE 190 PAGESIZE 200 TRIMSPOOL ON
