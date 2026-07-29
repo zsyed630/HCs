@@ -1,3 +1,30 @@
+cd ~/fscebd_pulse && cat > fs_ins.sql <<'EOF'
+SET DEFINE OFF FEEDBACK OFF LINESIZE 190 PAGESIZE 300 LONG 400 TRIMSPOOL ON
+ALTER SESSION DISABLE PARALLEL QUERY;
+COL txt FOR A150 WORD_WRAPPED
+PROMPT ===== THE INSERT FAMILY : WHAT IS IT =====
+SELECT sql_id, SUBSTR(REGEXP_REPLACE(sql_text,'[[:space:]]+',' '),1,150) txt
+FROM   dba_hist_sqltext
+WHERE  sql_id IN ('8yvx74yywph2y','gb9rnzxm22c4y','99b2ytpu27r7x',
+                  '2u327pfkabvsm','120ts6kvn43as');
+PROMPT ===== ROWS AND RATE PER EXECUTION =====
+WITH s AS (SELECT MIN(snap_id) lo, MAX(snap_id) hi, MAX(dbid) dbid
+           FROM dba_hist_snapshot WHERE end_interval_time > SYSDATE-45)
+SELECT st.sql_id, SUM(st.executions_delta) execs,
+       ROUND(SUM(st.elapsed_time_delta)/1e6,1) total_s,
+       SUM(st.rows_processed_delta) rows_ins,
+       ROUND(SUM(st.rows_processed_delta)
+             /NULLIF(SUM(st.elapsed_time_delta)/1e6,0)) rows_per_sec
+FROM   dba_hist_sqlstat st, s
+WHERE  st.snap_id BETWEEN s.lo AND s.hi AND st.dbid = s.dbid
+AND    st.plan_hash_value = 1696790825
+GROUP  BY st.sql_id ORDER BY 3 DESC;
+EXIT
+EOF
+sqlplus -s -L "/ as sysdba" @fs_ins.sql
+
+
+
 cd ~/fscebd_pulse && cat > fs_idx.sql <<'EOF'
 SET DEFINE OFF FEEDBACK OFF LINESIZE 190 PAGESIZE 300 TRIMSPOOL ON
 ALTER SESSION DISABLE PARALLEL QUERY;
