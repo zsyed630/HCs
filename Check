@@ -1,3 +1,67 @@
+cd ~/fscebd_pulse && cat > fs_live.sql <<'EOF'
+SET DEFINE OFF FEEDBACK OFF VERIFY OFF LINESIZE 165 PAGESIZE 400 TRIMSPOOL ON
+ALTER SESSION DISABLE PARALLEL QUERY;
+COL runcntlid FOR A28
+COL oprid FOR A9
+COL cid FOR A9
+COL stat FOR A11
+COL event FOR A30
+COL ev FOR A30
+COL target FOR A26
+COL opname FOR A14
+COL program FOR A16
+COL started FOR A14
+PROMPT ===== FS_CEBD PROCESS SCHEDULER =====
+SELECT prcsinstance pi, oprid, runcntlid,
+       DECODE(runstatus,3,'ERROR',5,'QUEUED',6,'INITIATED',7,'PROCESSING',
+                        9,'SUCCESS',10,'NOTSUCCESS',TO_CHAR(runstatus)) stat,
+       TO_CHAR(begindttm,'MM-DD HH24:MI:SS') started,
+       ROUND((CAST(NVL(enddttm,SYSTIMESTAMP) AS DATE)
+             -CAST(begindttm AS DATE))*1440,1) mins
+FROM   sysadm.psprcsrqst
+WHERE  prcsname='FS_CEBD' AND begindttm > SYSTIMESTAMP - 1
+ORDER  BY begindttm DESC FETCH FIRST 5 ROWS ONLY;
+PROMPT ===== LONGOPS + WHO =====
+SELECT l.inst_id i, l.sid, l.opname, l.target, l.sofar, l.totalwork,
+       ROUND(l.sofar/NULLIF(l.totalwork,0)*100,1) pct, l.time_remaining tr,
+       s.client_identifier cid, s.program, s.sql_id
+FROM   gv$session_longops l
+JOIN   gv$session s ON s.inst_id=l.inst_id AND s.sid=l.sid AND s.serial#=l.serial#
+WHERE  l.time_remaining > 0
+ORDER  BY l.time_remaining DESC;
+PROMPT ===== ACTIVE BATCH SESSIONS =====
+SELECT s.inst_id i, s.sid, s.serial#, s.client_identifier cid, s.state,
+       s.event, s.seconds_in_wait siw, s.sql_id, q.plan_hash_value phv,
+       ROUND(s.last_call_et/60,1) call_min
+FROM   gv$session s
+LEFT   JOIN gv$sql q ON q.inst_id=s.inst_id AND q.sql_id=s.sql_id
+                    AND q.child_number=s.sql_child_number
+WHERE  s.type='USER' AND s.status='ACTIVE'
+AND   (s.program LIKE 'PSAE%' OR s.program LIKE 'PSNVS%'
+       OR s.client_identifier IN (SELECT oprid FROM sysadm.psprcsrqst
+                                  WHERE prcsname='FS_CEBD' AND runstatus IN (6,7)))
+ORDER  BY s.last_call_et DESC;
+PROMPT ===== ASH LAST 5 MIN =====
+SELECT sql_id, DECODE(session_state,'ON CPU','CPU',event) ev, COUNT(*) samples,
+       ROUND(COUNT(*)*100/SUM(COUNT(*)) OVER (),1) pct
+FROM   gv$active_session_history
+WHERE  sample_time > SYSTIMESTAMP - INTERVAL '5' MINUTE
+AND    session_type='FOREGROUND'
+GROUP  BY sql_id, DECODE(session_state,'ON CPU','CPU',event)
+ORDER  BY COUNT(*) DESC FETCH FIRST 12 ROWS ONLY;
+PROMPT ===== FIX STILL IN FORCE =====
+SELECT table_name, num_rows, sample_size,
+       ROUND(sample_size/NULLIF(num_rows,0)*100,2) pct_sampled, last_analyzed
+FROM   dba_tab_statistics
+WHERE  owner='SYSADM' AND object_type='TABLE'
+AND    table_name IN ('PS_COMBO_DATA_TBL','PS_COMBO_DATA_BUDG')
+ORDER  BY table_name;
+EXIT
+EOF
+sqlplus -s -L "/ as sysdba" @fs_live.sql
+
+
+
 
 cd ~/fscebd_pulse && cat > fs_live.sql <<'EOF'
 SET DEFINE OFF FEEDBACK OFF VERIFY OFF LINESIZE 200 PAGESIZE 300 TRIMSPOOL ON
