@@ -1,3 +1,47 @@
+
+cd ~/fscebd_pulse && cat > fs_tao.sql <<'EOF'
+SET DEFINE OFF FEEDBACK OFF LINESIZE 190 PAGESIZE 300 TRIMSPOOL ON
+ALTER SESSION DISABLE PARALLEL QUERY;
+COL table_name FOR A22
+COL txt FOR A150 WORD_WRAPPED
+PROMPT ===== ALL FS_CEBD TAO TABLES : STATS vs LOCK STATE =====
+SELECT table_name, num_rows stat_rows, sample_size, last_analyzed,
+       stattype_locked, stale_stats
+FROM   dba_tab_statistics
+WHERE  owner='SYSADM' AND object_type='TABLE'
+AND    table_name LIKE 'PS_FS_CEBD_TAO%'
+ORDER  BY table_name;
+PROMPT ===== TAO4 ACTUAL CONTENTS =====
+SELECT COUNT(*) actual_rows, COUNT(DISTINCT process_instance) instances,
+       COUNT(DISTINCT setid||'~'||process_group) distinct_keys
+FROM   sysadm.ps_fs_cebd_tao4;
+PROMPT ===== WHO IS 1mxusbsxafhkh =====
+SELECT SUBSTR(REGEXP_REPLACE(sql_text,'[[:space:]]+',' '),1,150) txt
+FROM   dba_hist_sqltext WHERE sql_id='1mxusbsxafhkh';
+PROMPT ===== 41zzdbmdhhxbw : ALL THREE PLANS =====
+WITH s AS (SELECT MIN(snap_id) lo, MAX(snap_id) hi, MAX(dbid) dbid
+           FROM dba_hist_snapshot WHERE end_interval_time > SYSDATE-45)
+SELECT st.plan_hash_value phv, SUM(st.executions_delta) execs,
+       ROUND(SUM(st.elapsed_time_delta)/1e6/NULLIF(SUM(st.executions_delta),0),2) avg_s,
+       ROUND(SUM(st.buffer_gets_delta)/NULLIF(SUM(st.executions_delta),0)) avg_gets,
+       ROUND(SUM(st.rows_processed_delta)/NULLIF(SUM(st.executions_delta),0)) avg_rows,
+       TO_CHAR(MAX(sn.end_interval_time),'MM-DD HH24:MI') last_seen
+FROM   dba_hist_sqlstat st, dba_hist_snapshot sn, s
+WHERE  st.snap_id BETWEEN s.lo AND s.hi AND st.dbid = s.dbid
+AND    sn.snap_id = st.snap_id AND sn.dbid = st.dbid
+AND    sn.instance_number = st.instance_number
+AND    st.sql_id = '41zzdbmdhhxbw'
+GROUP  BY st.plan_hash_value ORDER BY 3;
+PROMPT ===== WHO GATHERED TAO4 ON 07-28 =====
+SELECT operation, target, target_type, start_time, end_time, status
+FROM   dba_optstat_operations
+WHERE  start_time > TIMESTAMP '2026-07-27 00:00:00'
+ORDER  BY start_time DESC FETCH FIRST 20 ROWS ONLY;
+EXIT
+EOF
+sqlplus -s -L "/ as sysdba" @fs_tao.sql | tee fs_tao_$(date +%H%M%S).out
+
+
 cd ~/fscebd_pulse && cat > fs_gap.sql <<'EOF'
 SET DEFINE OFF FEEDBACK OFF LINESIZE 190 PAGESIZE 200 TRIMSPOOL ON
 ALTER SESSION DISABLE PARALLEL QUERY;
