@@ -1,3 +1,20 @@
+cd ~/fscebd_pulse && nohup sqlplus -s -L "/ as sysdba" @fprd_pulse.sql </dev/null > pulse_$(date +%H%M%S).log 2>&1 & echo "pid=$!"; sleep 20; ps -o pid,stat,wchan:20,etime -p $!
+
+SET LINESIZE 250 PAGESIZE 200 DEFINE OFF
+COL event FOR A34
+COL txt   FOR A80
+SELECT s.sid, s.serial#, s.state, s.event, s.seconds_in_wait siw, s.sql_id,
+       q.plan_hash_value phv, SUBSTR(q.sql_text,1,80) txt
+FROM   v$session s
+LEFT   JOIN v$sql q ON q.sql_id = s.sql_id AND q.child_number = s.sql_child_number
+WHERE  s.type='USER' AND s.program LIKE 'sqlplus%'
+AND    s.sid <> SYS_CONTEXT('USERENV','SID');
+
+SELECT sid, opname, target, sofar, totalwork,
+       ROUND(sofar/NULLIF(totalwork,0)*100,1) pct, time_remaining, elapsed_seconds
+FROM   v$session_longops WHERE time_remaining > 0;
+
+
 cd ~/fscebd_pulse && timeout 900 sqlplus -s -L "/ as sysdba" @fprd_pulse.sql < /dev/null > pulse_$(date +%H%M%S).log 2>&1; echo "exit=$?"
 
 
