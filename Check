@@ -1,3 +1,38 @@
+cd ~/fscebd_pulse && cat > fs_gap.sql <<'EOF'
+SET DEFINE OFF FEEDBACK OFF LINESIZE 190 PAGESIZE 200 TRIMSPOOL ON
+ALTER SESSION DISABLE PARALLEL QUERY;
+COL pref FOR A34
+COL tab_val FOR A26
+COL glob_val FOR A26
+PROMPT ===== NO_INVALIDATE + DEGREE : TABLE vs GLOBAL =====
+SELECT 'NO_INVALIDATE' pref,
+       DBMS_STATS.GET_PREFS('NO_INVALIDATE','SYSADM','PS_COMBO_DATA_TBL') tab_val,
+       DBMS_STATS.GET_PREFS('NO_INVALIDATE') glob_val FROM dual
+UNION ALL SELECT 'DEGREE',
+       DBMS_STATS.GET_PREFS('DEGREE','SYSADM','PS_COMBO_DATA_TBL'),
+       DBMS_STATS.GET_PREFS('DEGREE') FROM dual
+UNION ALL SELECT 'ESTIMATE_PERCENT',
+       DBMS_STATS.GET_PREFS('ESTIMATE_PERCENT','SYSADM','PS_COMBO_DATA_TBL'),
+       DBMS_STATS.GET_PREFS('ESTIMATE_PERCENT') FROM dual;
+PROMPT ===== DELETE PLAN FLIP : BY PLAN HASH, ALL RUNS =====
+WITH s AS (SELECT MIN(snap_id) lo, MAX(snap_id) hi, MAX(dbid) dbid
+           FROM dba_hist_snapshot WHERE end_interval_time > SYSDATE-45)
+SELECT h.sql_plan_hash_value phv, COUNT(DISTINCT h.sql_id) distinct_sqlids,
+       COUNT(*)*10 db_secs, TO_CHAR(MAX(h.sample_time),'MM-DD HH24:MI') last_seen
+FROM   dba_hist_active_sess_history h, s
+WHERE  h.snap_id BETWEEN s.lo AND s.hi AND h.dbid = s.dbid
+AND    h.sql_plan_hash_value IN (1034386389,3458525469)
+GROUP  BY h.sql_plan_hash_value ORDER BY 3 DESC;
+PROMPT ===== TAO4 STATS : is the driving temp table analyzed =====
+SELECT table_name, num_rows, sample_size, last_analyzed, temporary
+FROM   dba_tables WHERE owner='SYSADM' AND table_name='PS_FS_CEBD_TAO4';
+PROMPT ===== LIVE DELETE PLAN =====
+SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY_CURSOR('a669dby3jvzhc',NULL,'ALLSTATS LAST +PEEKED_BINDS'));
+EXIT
+EOF
+sqlplus -s -L "/ as sysdba" @fs_gap.sql | tee fs_gap_$(date +%H%M%S).out
+
+
 
 cd ~/fscebd_pulse && cat > fs_ids.sql <<'EOF'
 SET DEFINE OFF FEEDBACK OFF LINESIZE 200 PAGESIZE 400 LONG 400 TRIMSPOOL ON
