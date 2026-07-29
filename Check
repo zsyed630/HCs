@@ -1,3 +1,7 @@
+
+cd ~/fscebd_pulse && . oraenv && OUT=rca2_$(date +%Y%m%d_%H%M%S).log && timeout 3600 sqlplus -s -L "/ as sysdba" @fscebd_rca_v2.sql </dev/null > "$OUT" 2>&1; echo "exit=$?"; ls -lh "$OUT"; echo "=== errors ==="; grep -c "^ORA-\|^SP2-" "$OUT"; grep -n "^ORA-\|^SP2-" "$OUT" | head -10; echo "=== preflight ==="; sed -n '1,30p' "$OUT"
+
+
 cd ~/fscebd_pulse && ls -l fscebd_pin.sql fscebd_rca.sql && sed -i "s/^  :v_pi       := .*/  :v_pi       := 26270723;/" fscebd_pin.sql && grep -n "v_pi " fscebd_pin.sql && . oraenv && OUT=rca_$(date +%Y%m%d_%H%M%S).log && timeout 2400 sqlplus -s -L "/ as sysdba" @fscebd_rca.sql </dev/null > "$OUT" 2>&1; echo "exit=$?"; ls -lh "$OUT"; sed -n '1,40p' "$OUT"; echo "=== errors ==="; grep -n "^ORA-\|^SP2-" "$OUT" | head -20
 
 
