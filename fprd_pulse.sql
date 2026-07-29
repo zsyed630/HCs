@@ -145,8 +145,12 @@ BEGIN
   BEGIN
     FOR r IN (SELECT /*+ NO_PARALLEL */ /* FSCEBD_PULSE */
                      s.inst_id i, s.sid sd, s.serial# sr, s.sql_id sq,
-                     s.sql_plan_hash_value ph, s.state st, s.event ev, s.seconds_in_wait sw
+                     q.plan_hash_value ph, s.state st, s.event ev,
+                     s.seconds_in_wait sw
               FROM   gv$session s
+              LEFT   JOIN gv$sql q ON q.inst_id = s.inst_id
+                                  AND q.sql_id = s.sql_id
+                                  AND q.child_number = s.sql_child_number
               WHERE  s.username='SYSADM'
               AND    (UPPER(s.client_identifier) LIKE '%'||UPPER(v_oprid)||'%'
                       OR UPPER(s.program) LIKE '%PSAE%')
@@ -402,8 +406,8 @@ BEGIN
                            /GREATEST(SUM(s.executions),1),2) spe,
                      ROUND(SUM(s.buffer_gets)/GREATEST(SUM(s.executions),1)) gpe,
                      ROUND(SUM(s.rows_processed)/GREATEST(SUM(s.executions),1)) rpe,
-                     SUM(s.px_servers_execs) px
-              FROM   gv$sqlstats s
+                     SUM(s.px_servers_executions) px
+              FROM   gv$sql s
               WHERE  s.last_active_time >= v_beg
               AND    s.parsing_schema_name = 'SYSADM'
               AND    UPPER(DBMS_LOB.SUBSTR(s.sql_fulltext,300,1))

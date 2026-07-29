@@ -84,13 +84,17 @@ BEGIN
     || LPAD('WAIT_S',8));
   BEGIN
     FOR r IN (SELECT /*+ NO_PARALLEL */ /* FSCEBD_PULSE */
-                     inst_id i, sid sd, sql_id sq, sql_plan_hash_value ph,
-                     state st, event ev, seconds_in_wait sw
-              FROM   gv$session
-              WHERE  username='SYSADM'
-              AND    (UPPER(client_identifier) LIKE '%'||UPPER(v_oprid)||'%'
-                      OR UPPER(program) LIKE '%PSAE%')
-              ORDER  BY logon_time)
+                     s.inst_id i, s.sid sd, s.sql_id sq,
+                     q.plan_hash_value ph,
+                     s.state st, s.event ev, s.seconds_in_wait sw
+              FROM   gv$session s
+              LEFT   JOIN gv$sql q ON q.inst_id = s.inst_id
+                                  AND q.sql_id = s.sql_id
+                                  AND q.child_number = s.sql_child_number
+              WHERE  s.username='SYSADM'
+              AND    (UPPER(s.client_identifier) LIKE '%'||UPPER(v_oprid)||'%'
+                      OR UPPER(s.program) LIKE '%PSAE%')
+              ORDER  BY s.logon_time)
     LOOP
       p('  ' || RPAD(r.i,5) || RPAD(r.sd,7) || RPAD(NVL(r.sq,'-'),15)
         || RPAD(NVL(TO_CHAR(r.ph),'-'),12) || RPAD(NVL(r.st,'-'),8)
