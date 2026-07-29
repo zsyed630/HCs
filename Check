@@ -1,3 +1,43 @@
+cd ~/fscebd_pulse && cat > fs_seg.sql <<'EOF'
+SET DEFINE OFF FEEDBACK OFF LINESIZE 190 PAGESIZE 300 TRIMSPOOL ON
+ALTER SESSION DISABLE PARALLEL QUERY;
+COL object_name FOR A24
+COL index_name FOR A22
+PROMPT ===== ARE ALL 3 INDEXES ACTUALLY READ =====
+WITH s AS (SELECT MIN(snap_id) lo, MAX(snap_id) hi, MAX(dbid) dbid
+           FROM dba_hist_snapshot WHERE end_interval_time > SYSDATE-45)
+SELECT ss.object_name,
+       SUM(CASE WHEN ss.statistic_name='logical reads'      THEN ss.value END) lreads,
+       SUM(CASE WHEN ss.statistic_name='physical reads'     THEN ss.value END) preads,
+       SUM(CASE WHEN ss.statistic_name='db block changes'   THEN ss.value END) changes
+FROM   dba_hist_seg_stat_obj o
+JOIN   dba_hist_seg_stat ss ON ss.obj#=o.obj# AND ss.dataobj#=o.dataobj#
+                           AND ss.dbid=o.dbid, s
+WHERE  ss.snap_id BETWEEN s.lo AND s.hi AND ss.dbid = s.dbid
+AND    o.object_name IN ('PS_COMBO_DATA_TBL','PSACOMBO_DATA_TBL','PSBCOMBO_DATA_TBL')
+GROUP  BY ss.object_name ORDER BY 2 DESC;
+PROMPT (high changes + near-zero reads = maintained but never used)
+PROMPT ===== ANY PLAN IN 45 DAYS THAT READS PSBCOMBO =====
+SELECT DISTINCT object_name, COUNT(DISTINCT sql_id) sqls
+FROM   dba_hist_sql_plan
+WHERE  object_owner='SYSADM'
+AND    object_name IN ('PSACOMBO_DATA_TBL','PSBCOMBO_DATA_TBL','PS_COMBO_DATA_TBL')
+GROUP  BY object_name ORDER BY 2 DESC;
+PROMPT ===== INDEX SIZE = MAINTENANCE COST =====
+SELECT segment_name index_name, ROUND(bytes/1024/1024) mb, blocks
+FROM   dba_segments WHERE owner='SYSADM'
+AND    segment_name IN ('PSACOMBO_DATA_TBL','PSBCOMBO_DATA_TBL','PS_COMBO_DATA_TBL')
+ORDER  BY bytes DESC;
+PROMPT ===== RUN CLOCK =====
+SELECT runstatus, ROUND((CAST(NVL(enddttm,SYSTIMESTAMP) AS DATE)
+       -CAST(begindttm AS DATE))*1440,1) mins
+FROM   sysadm.psprcsrqst WHERE prcsinstance=26270723;
+EXIT
+EOF
+sqlplus -s -L "/ as sysdba" @fs_seg.sql
+
+
+
 cd ~/fscebd_pulse && cat > fs_ins.sql <<'EOF'
 SET DEFINE OFF FEEDBACK OFF LINESIZE 190 PAGESIZE 300 LONG 400 TRIMSPOOL ON
 ALTER SESSION DISABLE PARALLEL QUERY;
