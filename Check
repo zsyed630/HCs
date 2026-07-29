@@ -1,3 +1,33 @@
+cd ~/fscebd_pulse && cat > fs_next.sql <<'EOF'
+SET DEFINE OFF FEEDBACK OFF LINESIZE 190 PAGESIZE 300 LONG 4000 TRIMSPOOL ON
+COL txt FOR A170 WORD_WRAPPED
+COL operation FOR A28
+COL target FOR A34
+PROMPT ===== WHICH TABLE DOES 1mxusbsxafhkh GATHER =====
+SELECT SUBSTR(REGEXP_REPLACE(sql_text,'[[:space:]]+',' '),1,170) txt
+FROM   dba_hist_sqltext WHERE sql_id='1mxusbsxafhkh';
+PROMPT ===== SNAP RANGE WHERE 2102858573 WAS USED =====
+SELECT MIN(st.snap_id) best_snap_lo, MAX(st.snap_id) best_snap_hi,
+       MIN(sn.begin_interval_time) from_t, MAX(sn.end_interval_time) to_t
+FROM   dba_hist_sqlstat st JOIN dba_hist_snapshot sn
+       ON sn.snap_id=st.snap_id AND sn.dbid=st.dbid
+       AND sn.instance_number=st.instance_number
+WHERE  st.sql_id='41zzdbmdhhxbw' AND st.plan_hash_value=2102858573;
+PROMPT ===== OPTSTAT OPS (TARGET_TYPE does not exist in 19c) =====
+SELECT operation, target, start_time, end_time, status
+FROM   dba_optstat_operations
+WHERE  start_time > TIMESTAMP '2026-07-27 00:00:00'
+ORDER  BY start_time DESC FETCH FIRST 15 ROWS ONLY;
+PROMPT ===== MASTER BUILD STATUS =====
+SELECT prcsinstance, runstatus,
+       TO_CHAR(begindttm,'HH24:MI:SS') started, TO_CHAR(enddttm,'HH24:MI:SS') ended,
+       ROUND((CAST(NVL(enddttm,SYSTIMESTAMP) AS DATE)-CAST(begindttm AS DATE))*1440,1) mins
+FROM   sysadm.psprcsrqst WHERE prcsinstance=26270723;
+EXIT
+EOF
+sqlplus -s -L "/ as sysdba" @fs_next.sql
+
+
 
 cd ~/fscebd_pulse && cat > fs_tao.sql <<'EOF'
 SET DEFINE OFF FEEDBACK OFF LINESIZE 190 PAGESIZE 300 TRIMSPOOL ON
