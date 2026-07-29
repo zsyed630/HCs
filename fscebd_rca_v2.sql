@@ -30,11 +30,11 @@ ALTER SESSION DISABLE PARALLEL QUERY;
 -- ---------------------------------------------------------------------
 -- knobs
 -- ---------------------------------------------------------------------
-DEFINE d_prcs   = 'FS_CEBD'
-DEFINE d_master = 'FDC_COMBO_BUILD_MASTER_RUNCNTL'
+DEFINE d_prcs   = FS_CEBD
+DEFINE d_master = FDC_COMBO_BUILD_MASTER_RUNCNTL
 DEFINE d_look   = 120
-DEFINE d_upg    = '2026-06-26 00:00:00'
-DEFINE d_fix    = '2026-07-28 12:00:00'
+DEFINE d_upg    = 2026-06-26 00:00:00
+DEFINE d_fix    = 2026-07-28 12:00:00
 
 COL era        FOR A18
 COL runcntlid  FOR A30
@@ -91,14 +91,14 @@ SELECT prcsinstance pi_pick,
                      -CAST(begindttm AS DATE))*1440,1)) pi_mins
 FROM ( SELECT prcsinstance, begindttm, enddttm
        FROM   sysadm.psprcsrqst
-       WHERE  prcsname  = &d_prcs
-       AND    runcntlid = &d_master
+       WHERE  prcsname  = '&d_prcs'
+       AND    runcntlid = '&d_master'
        AND    begindttm IS NOT NULL
        ORDER  BY begindttm DESC )
 WHERE ROWNUM = 1;
 
 SELECT 'target master run = &d_pi   elapsed = &d_mins min   lookback = &d_look days'
-       ||'   upgrade = '||&d_upg||'   fix = '||&d_fix info FROM dual;
+       ||'   upgrade = '||'&d_upg'||'   fix = '||'&d_fix' info FROM dual;
 
 PROMPT
 PROMPT ####################################################################
@@ -112,12 +112,12 @@ WITH runs AS (
          ROUND((CAST(NVL(r.enddttm,SYSTIMESTAMP) AS DATE)
                -CAST(r.begindttm AS DATE))*86400) run_sec,
          CASE WHEN CAST(r.begindttm AS DATE)
-                   < TO_DATE(&d_upg,'YYYY-MM-DD HH24:MI:SS') THEN '1-PRE-UPGRADE'
+                   < TO_DATE('&d_upg','YYYY-MM-DD HH24:MI:SS') THEN '1-PRE-UPGRADE'
               WHEN CAST(r.begindttm AS DATE)
-                   < TO_DATE(&d_fix,'YYYY-MM-DD HH24:MI:SS') THEN '2-POST-UPG-PREFIX'
+                   < TO_DATE('&d_fix','YYYY-MM-DD HH24:MI:SS') THEN '2-POST-UPG-PREFIX'
               ELSE                                                '3-POST-FIX' END era
   FROM   sysadm.psprcsrqst r
-  WHERE  r.prcsname = &d_prcs
+  WHERE  r.prcsname = '&d_prcs'
   AND    r.begindttm IS NOT NULL
   AND    r.begindttm > SYSTIMESTAMP - &d_look
   AND    r.runstatus NOT IN (2,5,8))
@@ -137,12 +137,12 @@ WITH runs AS (
          ROUND((CAST(NVL(r.enddttm,SYSTIMESTAMP) AS DATE)
                -CAST(r.begindttm AS DATE))*86400) run_sec,
          CASE WHEN CAST(r.begindttm AS DATE)
-                   < TO_DATE(&d_upg,'YYYY-MM-DD HH24:MI:SS') THEN '1-PRE-UPGRADE'
+                   < TO_DATE('&d_upg','YYYY-MM-DD HH24:MI:SS') THEN '1-PRE-UPGRADE'
               WHEN CAST(r.begindttm AS DATE)
-                   < TO_DATE(&d_fix,'YYYY-MM-DD HH24:MI:SS') THEN '2-POST-UPG-PREFIX'
+                   < TO_DATE('&d_fix','YYYY-MM-DD HH24:MI:SS') THEN '2-POST-UPG-PREFIX'
               ELSE                                                '3-POST-FIX' END era
   FROM   sysadm.psprcsrqst r
-  WHERE  r.prcsname = &d_prcs
+  WHERE  r.prcsname = '&d_prcs'
   AND    r.begindttm IS NOT NULL
   AND    r.begindttm > SYSTIMESTAMP - &d_look
   AND    r.runstatus NOT IN (2,5,8))
@@ -163,7 +163,7 @@ WITH runs AS (
   SELECT CAST(r.begindttm AS DATE) b,
          CAST(NVL(r.enddttm,SYSTIMESTAMP) AS DATE) e
   FROM   sysadm.psprcsrqst r
-  WHERE  r.prcsname = &d_prcs AND r.begindttm IS NOT NULL
+  WHERE  r.prcsname = '&d_prcs' AND r.begindttm IS NOT NULL
   AND    r.begindttm > SYSTIMESTAMP - &d_look
   AND    r.runstatus NOT IN (2,5,8))
 SELECT COUNT(DISTINCT sn.snap_id) snaps_of_interest,
@@ -191,12 +191,12 @@ WITH runs AS (
          ROUND((CAST(NVL(r.enddttm,SYSTIMESTAMP) AS DATE)
                -CAST(r.begindttm AS DATE))*86400) run_sec,
          CASE WHEN CAST(r.begindttm AS DATE)
-                   < TO_DATE(&d_upg,'YYYY-MM-DD HH24:MI:SS') THEN '1-PRE-UPGRADE'
+                   < TO_DATE('&d_upg','YYYY-MM-DD HH24:MI:SS') THEN '1-PRE-UPGRADE'
               WHEN CAST(r.begindttm AS DATE)
-                   < TO_DATE(&d_fix,'YYYY-MM-DD HH24:MI:SS') THEN '2-POST-UPG-PREFIX'
+                   < TO_DATE('&d_fix','YYYY-MM-DD HH24:MI:SS') THEN '2-POST-UPG-PREFIX'
               ELSE                                                '3-POST-FIX' END era
   FROM   sysadm.psprcsrqst r
-  WHERE  r.prcsname = &d_prcs AND r.begindttm IS NOT NULL
+  WHERE  r.prcsname = '&d_prcs' AND r.begindttm IS NOT NULL
   AND    r.begindttm > SYSTIMESTAMP - &d_look
   AND    r.runstatus NOT IN (2,5,8)),
 snaps AS (
@@ -246,12 +246,12 @@ WITH runs AS (
          CAST(r.begindttm AS DATE) b,
          CAST(NVL(r.enddttm,SYSTIMESTAMP) AS DATE) e,
          CASE WHEN CAST(r.begindttm AS DATE)
-                   < TO_DATE(&d_upg,'YYYY-MM-DD HH24:MI:SS') THEN '1-PRE-UPGRADE'
+                   < TO_DATE('&d_upg','YYYY-MM-DD HH24:MI:SS') THEN '1-PRE-UPGRADE'
               WHEN CAST(r.begindttm AS DATE)
-                   < TO_DATE(&d_fix,'YYYY-MM-DD HH24:MI:SS') THEN '2-POST-UPG-PREFIX'
+                   < TO_DATE('&d_fix','YYYY-MM-DD HH24:MI:SS') THEN '2-POST-UPG-PREFIX'
               ELSE                                                '3-POST-FIX' END era
   FROM   sysadm.psprcsrqst r
-  WHERE  r.prcsname = &d_prcs AND r.begindttm IS NOT NULL
+  WHERE  r.prcsname = '&d_prcs' AND r.begindttm IS NOT NULL
   AND    r.begindttm > SYSTIMESTAMP - &d_look
   AND    r.runstatus NOT IN (2,5,8)),
 snaps AS (
@@ -317,12 +317,12 @@ WITH runs AS (
          CAST(r.begindttm AS DATE) b,
          CAST(NVL(r.enddttm,SYSTIMESTAMP) AS DATE) e,
          CASE WHEN CAST(r.begindttm AS DATE)
-                   < TO_DATE(&d_upg,'YYYY-MM-DD HH24:MI:SS') THEN '1-PRE-UPGRADE'
+                   < TO_DATE('&d_upg','YYYY-MM-DD HH24:MI:SS') THEN '1-PRE-UPGRADE'
               WHEN CAST(r.begindttm AS DATE)
-                   < TO_DATE(&d_fix,'YYYY-MM-DD HH24:MI:SS') THEN '2-POST-UPG-PREFIX'
+                   < TO_DATE('&d_fix','YYYY-MM-DD HH24:MI:SS') THEN '2-POST-UPG-PREFIX'
               ELSE                                                '3-POST-FIX' END era
   FROM   sysadm.psprcsrqst r
-  WHERE  r.prcsname = &d_prcs AND r.begindttm IS NOT NULL
+  WHERE  r.prcsname = '&d_prcs' AND r.begindttm IS NOT NULL
   AND    r.begindttm > SYSTIMESTAMP - &d_look
   AND    r.runstatus NOT IN (2,5,8)),
 snaps AS (
@@ -377,7 +377,7 @@ WITH runs AS (
          CAST(r.begindttm AS DATE) b,
          CAST(NVL(r.enddttm,SYSTIMESTAMP) AS DATE) e
   FROM   sysadm.psprcsrqst r
-  WHERE  r.prcsname = &d_prcs AND r.begindttm IS NOT NULL
+  WHERE  r.prcsname = '&d_prcs' AND r.begindttm IS NOT NULL
   AND    r.begindttm > SYSTIMESTAMP - &d_look
   AND    r.runstatus NOT IN (2,5,8)),
 snaps AS (
@@ -396,9 +396,9 @@ myids AS (
   AND    h.sql_id IS NOT NULL)
 SELECT * FROM (
   SELECT CASE WHEN sn.end_interval_time
-                   < TO_TIMESTAMP(&d_upg,'YYYY-MM-DD HH24:MI:SS') THEN '1-PRE-UPGRADE'
+                   < TO_TIMESTAMP('&d_upg','YYYY-MM-DD HH24:MI:SS') THEN '1-PRE-UPGRADE'
               WHEN sn.end_interval_time
-                   < TO_TIMESTAMP(&d_fix,'YYYY-MM-DD HH24:MI:SS') THEN '2-POST-UPG-PREFIX'
+                   < TO_TIMESTAMP('&d_fix','YYYY-MM-DD HH24:MI:SS') THEN '2-POST-UPG-PREFIX'
               ELSE                                                     '3-POST-FIX' END era,
          st.sql_id, st.plan_hash_value phv,
          SUM(st.executions_delta) execs,
@@ -421,9 +421,9 @@ SELECT * FROM (
   AND    sn.instance_number = st.instance_number
   AND    st.sql_id IN (SELECT sql_id FROM myids)
   GROUP  BY CASE WHEN sn.end_interval_time
-                      < TO_TIMESTAMP(&d_upg,'YYYY-MM-DD HH24:MI:SS') THEN '1-PRE-UPGRADE'
+                      < TO_TIMESTAMP('&d_upg','YYYY-MM-DD HH24:MI:SS') THEN '1-PRE-UPGRADE'
                  WHEN sn.end_interval_time
-                      < TO_TIMESTAMP(&d_fix,'YYYY-MM-DD HH24:MI:SS') THEN '2-POST-UPG-PREFIX'
+                      < TO_TIMESTAMP('&d_fix','YYYY-MM-DD HH24:MI:SS') THEN '2-POST-UPG-PREFIX'
                  ELSE                                                     '3-POST-FIX' END,
             st.sql_id, st.plan_hash_value
   ORDER  BY 5 DESC)
@@ -442,9 +442,9 @@ SELECT era, sql_id, SUM(execs) execs,
        ROUND(SUM(elapsed_s)/NULLIF(SUM(execs),0),2) s_per_exec
 FROM (
   SELECT CASE WHEN sn.end_interval_time
-                   < TO_TIMESTAMP(&d_upg,'YYYY-MM-DD HH24:MI:SS') THEN '1-PRE-UPGRADE'
+                   < TO_TIMESTAMP('&d_upg','YYYY-MM-DD HH24:MI:SS') THEN '1-PRE-UPGRADE'
               WHEN sn.end_interval_time
-                   < TO_TIMESTAMP(&d_fix,'YYYY-MM-DD HH24:MI:SS') THEN '2-POST-UPG-PREFIX'
+                   < TO_TIMESTAMP('&d_fix','YYYY-MM-DD HH24:MI:SS') THEN '2-POST-UPG-PREFIX'
               ELSE                                                     '3-POST-FIX' END era,
          st.sql_id, st.executions_delta execs,
          st.elapsed_time_delta/1e6 elapsed_s
@@ -563,12 +563,12 @@ WITH runs AS (
          CAST(r.begindttm AS DATE) b,
          CAST(NVL(r.enddttm,SYSTIMESTAMP) AS DATE) e,
          CASE WHEN CAST(r.begindttm AS DATE)
-                   < TO_DATE(&d_upg,'YYYY-MM-DD HH24:MI:SS') THEN '1-PRE-UPGRADE'
+                   < TO_DATE('&d_upg','YYYY-MM-DD HH24:MI:SS') THEN '1-PRE-UPGRADE'
               WHEN CAST(r.begindttm AS DATE)
-                   < TO_DATE(&d_fix,'YYYY-MM-DD HH24:MI:SS') THEN '2-POST-UPG-PREFIX'
+                   < TO_DATE('&d_fix','YYYY-MM-DD HH24:MI:SS') THEN '2-POST-UPG-PREFIX'
               ELSE                                                '3-POST-FIX' END era
   FROM   sysadm.psprcsrqst r
-  WHERE  r.prcsname = &d_prcs AND r.begindttm IS NOT NULL
+  WHERE  r.prcsname = '&d_prcs' AND r.begindttm IS NOT NULL
   AND    r.begindttm > SYSTIMESTAMP - &d_look
   AND    r.runstatus NOT IN (2,5,8)),
 snaps AS (
