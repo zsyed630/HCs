@@ -1,3 +1,29 @@
+SET LONG 32767
+SET LINESIZE 300
+
+-- backup the row
+CREATE TABLE sysadm.psmsgcat_bkp_20260805 AS
+SELECT * FROM sysadm.psmsgcatdefn
+WHERE  message_set_nbr = 26700 AND message_nbr = 301;
+
+-- before
+SELECT descrlong FROM sysadm.psmsgcatdefn
+WHERE  message_set_nbr = 26700 AND message_nbr = 301;
+
+-- swap the prefix (covers both links)
+UPDATE sysadm.psmsgcatdefn
+SET    descrlong = REPLACE(descrlong,
+                     'https://pshr-nmhealth.msappproxy.net/psp/HRPRD/',
+                     'https://pshr-q.corp.nm.org:8520/psp/HRQUA/'),
+       last_update_dttm = SYSTIMESTAMP
+WHERE  message_set_nbr = 26700 AND message_nbr = 301;
+
+-- after -- eyeball, then commit
+SELECT descrlong FROM sysadm.psmsgcatdefn
+WHERE  message_set_nbr = 26700 AND message_nbr = 301;
+
+-- COMMIT;
+
 
 cd ~/fscebd_pulse && . oraenv && OUT=rca3_$(date +%Y%m%d_%H%M%S).log && timeout 3600 sqlplus -s -L "/ as sysdba" @fscebd_rca_v2.sql </dev/null > "$OUT" 2>&1; echo "exit=$?"; echo -n "error count: "; grep -c "^ORA-\|^SP2-" "$OUT"; grep -n "^ORA-\|^SP2-" "$OUT" | head; echo "=== preflight ==="; sed -n '1,26p' "$OUT"
 
